@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ApplicationPackage SchemaVersion="1.0"
+                    AutodeskProduct="AutoCAD"
+                    ProductType="Application"
+                    Name="MultiClip"
+                    Description="Nine numbered clipboard slots for AutoCAD / Civil 3D"
+                    AppVersion="1.0.0"
+                    ProductCode="{6B1E3C52-8F0A-4D7E-9C21-3A5F4E7B9D10}"
+                    UpgradeCode="{0C4D8A97-2E61-4B3F-A8D5-7F19B2C6E043}">
+  <CompanyDetails Name="MultiClip" />
+  <Components>
+    <RuntimeRequirements OS="Win64" Platform="AutoCAD*" SeriesMin="R24.0" SeriesMax="R25.9" />
+    <ComponentEntry AppName="MultiClip"
+                    ModuleName="./Contents/MultiClip.lsp"
+                    AppDescription="Numbered clipboard slots (C1-C9 / P1-P9)"
+                    LoadOnAutoCADStartup="True"
+                    PerDocument="True" />
+  </Components>
+</ApplicationPackage>
