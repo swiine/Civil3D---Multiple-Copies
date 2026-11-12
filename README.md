@@ -29,12 +29,19 @@ Each slot is saved as a small DWG in `%LOCALAPPDATA%\C3D-MultiClip`. Slots work 
 
 ## Install
 
-**Option A: auto-load (recommended)**
+**Option A: installer (easiest)**
+1. Unzip `MultiClip.zip`.
+2. Double-click `Install.bat`.
+3. Restart Civil 3D. If a security prompt about loading MultiClip.lsp appears, choose **Always Load**.
+
+To remove it, double-click `Uninstall.bat`.
+
+**Option B: auto-load by hand**
 1. Copy the whole `MultiClip.bundle` folder to
    `%APPDATA%\Autodesk\ApplicationPlugins\`
 2. Restart Civil 3D. If a security prompt about loading MultiClip.lsp appears, choose **Always Load**.
 
-**Option B: manual**
+**Option C: manual**
 1. Type `APPLOAD` and browse to `MultiClip.bundle\Contents\MultiClip.lsp`.
 2. To load it every session, click **Contents…** under *Startup Suite* and add the file there.
 
