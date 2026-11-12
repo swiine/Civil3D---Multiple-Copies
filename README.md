@@ -22,6 +22,7 @@ It is a single AutoLISP file. Nothing has to be compiled, and it also works in p
 | `MVO`       | Paste to original coordinates, then press a number key               |
 | `MCLIST`    | Show what is in each slot                                            |
 | `MCCLEAR`   | Empty all slots                                                      |
+| `MCDIAG`    | Run a self-test and save a report (troubleshooting)                  |
 
 For example, type `C2` and press Enter to copy into slot 2. Later, type `P2` and press Enter to paste it.
 
@@ -71,3 +72,19 @@ If you take over Ctrl+C / Ctrl+V:
 - The paste is a single undo step. Press Esc while dragging and the paste is cancelled.
 - Civil 3D objects are copied the same way the built-in clipboard copies them, by writing them out to a DWG. Styles come with them. If the target drawing already has a style with the same name, the target drawing's version is used, just like a normal paste.
 - If the source and target drawings use different units (`INSUNITS`, e.g. feet vs. meters), AutoCAD scales the paste, the same as an insert does.
+
+## Troubleshooting
+
+**"Slot 1 is empty"**: the paste could not find a saved slot 1.
+- Copy with `C1`, not Ctrl+C. Ctrl+C only fills the normal Windows clipboard.
+- After `C1` the command line should say `Copied N object(s) to slot 1.` If it says something else, the copy failed.
+- Type `MCLIST` to see every slot and the folder they're saved in.
+
+**`MCDIAG`** checks each step MultiClip relies on:
+1. Whether the slot folder exists and can be written to.
+2. Whether the commands are loaded.
+3. What is saved in each slot.
+4. A test copy, using both export methods.
+5. A test paste, which is undone automatically afterwards.
+
+It prints the results, saves them to `MultiClip_Diag.txt` in the slot folder, and opens that file in Notepad so you can share it.

@@ -15,6 +15,7 @@
 ;;;    PO1..PO9  Paste slot 1..9 at original coordinates
 ;;;    MCLIST    Show what is in each slot
 ;;;    MCCLEAR   Empty all slots
+;;;    MCDIAG    Run a self-test and save a report (for troubleshooting)
 ;;;
 ;;;  Slots are saved as small DWG files in %LOCALAPPDATA%\C3D-MultiClip, so
 ;;;  they work across drawings and survive closing Civil 3D.
@@ -24,6 +25,8 @@
 ;;; ==========================================================================
 
 (vl-load-com)
+
+(setq *mc-version* "1.1")
 
 ;;; ---------------------------------------------------------------- storage
 
@@ -50,14 +53,17 @@
       (write-line (getvar "DWGNAME") f)
       (write-line (menucmd "M=$(edtime,$(getvar,date),YYYY-MO-DD HH:MM)") f)
       (close f)
+      T
     )
   )
 )
 
 ;;; Returns (basepoint count sourceDwg time) or nil when the slot is empty.
 (defun mc:read-info (n / f r)
-  (if (and (findfile (mc:dwg n)) (setq f (open (mc:info n) "r")))
-    (progn
+  (cond
+   ((not (findfile (mc:dwg n))) nil)
+   ((not (setq f (open (mc:info n) "r"))) (list '(0.0 0.0 0.0) 0 "?" "?"))
+   (T
       (setq r (vl-catch-all-apply
                 '(lambda ()
                    (list (read (read-line f))
@@ -81,7 +87,7 @@
 )
 
 (defun mc:list (/ n)
-  (princ "\n--- MultiClip slots ---")
+  (princ (strcat "\n--- MultiClip slots ---  (" (mc:dir) ")"))
   (setq n 0)
   (repeat 9
     (setq n (1+ n))
@@ -221,15 +227,36 @@
   (vlax-safearray-fill arr objs)
   (vla-AddItems sso (vlax-make-variant arr))
   (setq r (vl-catch-all-apply 'vla-Wblock (list doc file sso)))
-  (vla-Delete sso)
+  (vl-catch-all-apply 'vla-Delete (list sso))
 
-  (if (vl-catch-all-error-p r)
+  ;; Fallback: if the ActiveX export did not produce a file, use the
+  ;; -WBLOCK command (base point = WCS origin) and OOPS to restore the
+  ;; originals, which -WBLOCK removes from the drawing.
+  (if (not (findfile file))
     (progn
-      (princ (strcat "\nCopy failed: " (vl-catch-all-error-message r)))
+      (if (vl-catch-all-error-p r)
+        (princ (strcat "\nMultiClip: ActiveX export failed (" (vl-catch-all-error-message r)
+                       "), trying -WBLOCK..."))
+      )
+      (setq *mc-ucs* T)
+      (command "_.UCS" "_W")
+      (command "_.-WBLOCK" file "" "_non" "0,0,0" ss "")
+      (while (> (getvar "CMDACTIVE") 0) (command ""))
+      (command "_.OOPS")
+      (command "_.UCS" "_P")
+      (setq *mc-ucs* nil)
+    )
+  )
+
+  (if (not (findfile file))
+    (progn
+      (princ (strcat "\nCopy FAILED - slot file was not created:\n  " file))
       (exit)
     )
   )
-  (mc:write-info n base (length objs))
+  (if (not (mc:write-info n base (length objs)))
+    (princ (strcat "\nWarning: could not write " (mc:info n)))
+  )
   (princ (strcat "\nCopied " (itoa (length objs)) " object(s) to slot " (itoa n) "."))
 )
 
@@ -252,7 +279,10 @@
   (setq doc  (mc:doc)
         file (mc:dwg n))
   (if (not (setq info (mc:read-info n)))
-    (progn (princ (strcat "\nSlot " (itoa n) " is empty.")) (exit))
+    (progn
+      (princ (strcat "\nSlot " (itoa n) " is empty - copy something into it first with C"
+                     (itoa n) " (not Ctrl+C).\n  Looked for: " file))
+      (exit))
   )
   (setq base (car info)
         lastent (entlast))
@@ -306,6 +336,159 @@
       (while (> (getvar "CMDACTIVE") 0) (command pause))
     )
   )
+)
+
+;;; ------------------------------------------------------------ diagnostics
+;;; MCDIAG: checks every step MultiClip relies on, prints the results and
+;;; saves them to MultiClip_Diag.txt (opened in Notepad) so they can be shared.
+
+(defun mc:log (s) (setq *mc-diag* (cons s *mc-diag*)) (princ (strcat "\n" s)))
+(defun mc:yn (x) (if x "OK" "FAILED"))
+(defun mc:fsize (f / s) (if (setq s (vl-file-size f)) (strcat (itoa s) " bytes") "missing"))
+
+(defun C:MCDIAG (/ dir f test ss tmp objs r n lastent e cnt info logf)
+  (mc:begin)
+  (setq *mc-diag* nil)
+  (mc:log (strcat "=== MultiClip " *mc-version* " diagnostics  "
+                  (menucmd "M=$(edtime,$(getvar,date),YYYY-MO-DD HH:MM:SS)") " ==="))
+  (mc:log (strcat "Product: " (getvar "PRODUCT") "  ACADVER: " (getvar "ACADVER")
+                  "  Drawing: " (getvar "DWGPREFIX") (getvar "DWGNAME")))
+  (mc:log (strcat "Space: " (if (= (getvar "CVPORT") 1) "Paper" "Model")
+                  "  WORLDUCS: " (itoa (getvar "WORLDUCS"))
+                  "  PICKFIRST: " (itoa (getvar "PICKFIRST"))
+                  "  FILEDIA: " (itoa (getvar "FILEDIA"))
+                  "  SECURELOAD: " (vl-princ-to-string (getvar "SECURELOAD"))
+                  "  INSUNITS: " (itoa (getvar "INSUNITS"))))
+
+  ;; 1. Folder
+  (mc:log "--- 1. Slot folder ---")
+  (mc:log (strcat "LOCALAPPDATA = " (vl-princ-to-string (getenv "LOCALAPPDATA"))))
+  (mc:log (strcat "TEMP         = " (vl-princ-to-string (getenv "TEMP"))))
+  (setq dir (mc:dir))
+  (mc:log (strcat "Folder: " dir "  exists: " (mc:yn (vl-file-directory-p dir))))
+  (setq test (strcat dir "\\MultiClip_WriteTest.txt"))
+  (if (setq f (open test "w")) (progn (write-line "test" f) (close f)))
+  (mc:log (strcat "Can write to folder: " (mc:yn (findfile test))))
+  (if (findfile test) (vl-file-delete test))
+
+  ;; 2. Commands loaded
+  (mc:log "--- 2. Commands ---")
+  (mc:log (strcat "C1: " (mc:yn (= (type C:C1) 'USUBR))
+                  "  P1: " (mc:yn (= (type C:P1) 'USUBR))
+                  "  MC: " (mc:yn (= (type C:MC) 'USUBR))
+                  "  MV: " (mc:yn (= (type C:MV) 'USUBR))))
+
+  ;; 3. Slots on disk
+  (mc:log "--- 3. Slots ---")
+  (setq n 0)
+  (repeat 9
+    (setq n (1+ n))
+    (if (or (findfile (mc:dwg n)) (findfile (mc:info n)))
+      (mc:log (strcat "Slot " (itoa n) ": dwg " (mc:fsize (mc:dwg n))
+                      ", info " (mc:fsize (mc:info n))
+                      (if (setq info (mc:read-info n))
+                        (strcat ", base " (mc:pt->str (car info)) ", " (itoa (cadr info))
+                                " obj from " (caddr info) " " (cadddr info))
+                        "")))
+    )
+  )
+  (mc:log (strcat "Files in folder: " (vl-princ-to-string (vl-directory-files dir "*.*" 1))))
+
+  ;; 4. Export test
+  (mc:log "--- 4. Copy test ---")
+  (princ "\nSelect objects to test copying <Enter = use a temporary line>: ")
+  (setq ss (ssget))
+  (if (not ss)
+    (progn
+      (entmake (list '(0 . "LINE") '(10 0.0 0.0 0.0) '(11 10.0 10.0 0.0)))
+      (setq tmp (entlast) ss (ssadd tmp))
+      (mc:log "Using temporary LINE (0,0)-(10,10)")
+    )
+    (mc:log (strcat "Using " (itoa (sslength ss)) " selected object(s)"))
+  )
+  (setq objs (mc:ss->objs ss))
+  (mc:log (strcat "Object types: "
+                  (vl-princ-to-string (mapcar 'vla-get-ObjectName objs))))
+  (mc:log (strcat "Lower-left: " (vl-princ-to-string (mc:lowerleft objs))))
+
+  ;; 4a. ActiveX Wblock
+  (setq f (strcat dir "\\MultiClip_Test.dwg"))
+  (if (findfile f) (vl-file-delete f))
+  (setq r (vl-catch-all-apply
+            '(lambda (/ sets sso arr)
+               (setq sets (vla-get-SelectionSets (mc:doc)))
+               (if (not (vl-catch-all-error-p (setq sso (vl-catch-all-apply 'vla-Item (list sets "MULTICLIP_SS")))))
+                 (vla-Delete sso))
+               (setq sso (vla-Add sets "MULTICLIP_SS"))
+               (setq arr (vlax-make-safearray vlax-vbObject (cons 0 (1- (length objs)))))
+               (vlax-safearray-fill arr objs)
+               (vla-AddItems sso (vlax-make-variant arr))
+               (vla-Wblock (mc:doc) f sso)
+               (vla-Delete sso))))
+  (mc:log (strcat "ActiveX Wblock: "
+                  (if (vl-catch-all-error-p r) (strcat "ERROR " (vl-catch-all-error-message r)) "no error")
+                  ", file " (mc:fsize f)))
+
+  ;; 4b. -WBLOCK fallback
+  (setq test (strcat dir "\\MultiClip_Test2.dwg"))
+  (if (findfile test) (vl-file-delete test))
+  (setq r (vl-catch-all-apply
+            '(lambda ()
+               (command "_.UCS" "_W")
+               (command "_.-WBLOCK" test "" "_non" "0,0,0" ss "")
+               (while (> (getvar "CMDACTIVE") 0) (command ""))
+               (command "_.OOPS")
+               (command "_.UCS" "_P"))))
+  (mc:log (strcat "-WBLOCK: "
+                  (if (vl-catch-all-error-p r) (strcat "ERROR " (vl-catch-all-error-message r)) "no error")
+                  ", file " (mc:fsize test)
+                  ", originals still there: " (mc:yn (entget (ssname ss 0)))))
+
+  ;; 5. Insert test (then undone)
+  (mc:log "--- 5. Paste test ---")
+  (if (not (findfile f)) (setq f test))
+  (if (findfile f)
+    (progn
+      (vla-StartUndoMark (mc:doc))
+      (setq lastent (entlast))
+      (setq r (vl-catch-all-apply
+                '(lambda ()
+                   (command "_.UCS" "_W")
+                   (command "_.-INSERT" (strcat "*" f) "_non" "0,0,0" "1" "0")
+                   (while (> (getvar "CMDACTIVE") 0) (command ""))
+                   (command "_.UCS" "_P"))))
+      (setq cnt 0 e (if lastent (entnext lastent) (entnext)))
+      (while e (setq cnt (1+ cnt) e (entnext e)))
+      (vla-EndUndoMark (mc:doc))
+      (mc:log (strcat "-INSERT *: "
+                      (if (vl-catch-all-error-p r) (strcat "ERROR " (vl-catch-all-error-message r)) "no error")
+                      ", new entities: " (itoa cnt)))
+      (command "_.U")
+      (mc:log "(test paste undone)")
+    )
+    (mc:log "Skipped - no test file was created, so copying is what is broken.")
+  )
+  (foreach x (list (strcat dir "\\MultiClip_Test.dwg") test)
+    (if (findfile x) (vl-file-delete x)))
+  (vl-catch-all-apply 'vla-Delete
+    (list (vl-catch-all-apply 'vla-Item (list (vla-get-Blocks (mc:doc)) "MultiClip_Test"))))
+  (vl-catch-all-apply 'vla-Delete
+    (list (vl-catch-all-apply 'vla-Item (list (vla-get-Blocks (mc:doc)) "MultiClip_Test2"))))
+  (if (and tmp (entget tmp)) (entdel tmp))
+
+  ;; Save report
+  (setq logf (strcat dir "\\MultiClip_Diag.txt"))
+  (if (setq f (open logf "w"))
+    (progn
+      (foreach l (reverse *mc-diag*) (write-line l f))
+      (close f)
+      (princ (strcat "\n\nReport saved to: " logf))
+      (startapp "notepad" (strcat "\"" logf "\""))
+    )
+    (princ "\n\nCould not save report file - copy the lines above instead.")
+  )
+  (setq *mc-diag* nil)
+  (mc:finish)
 )
 
 ;;; -------------------------------------------------------------- commands
@@ -379,5 +562,5 @@
   (eval (list 'defun (read (strcat "C:PO" (itoa n))) '() (list 'mc:cmd-paste n T)))
 )
 
-(princ "\nMultiClip loaded:  C1-C9 copy  |  P1-P9 paste  |  PO1-PO9 paste original  |  MC / MV pick a slot  |  MCLIST")
+(princ (strcat "\nMultiClip " *mc-version* " loaded:  C1-C9 copy  |  P1-P9 paste  |  PO1-PO9 paste original  |  MC / MV pick a slot  |  MCLIST  |  MCDIAG"))
 (princ)
