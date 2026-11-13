@@ -8,7 +8,7 @@ It is a single AutoLISP file. Nothing has to be compiled, and it also works in p
 
 | Type        | What it does                                                                 |
 |-------------|------------------------------------------------------------------------------|
-| `PERFCHECK` | Full check + benchmarks (about 30–60 s). Opens the report in Notepad.        |
+| `PERFCHECK` | Full check + benchmarks (about 1–2 min). Opens the report in Notepad.        |
 | `PERFQUICK` | Quick "how is it right now" check (about 5–10 s), without the heavy tests.   |
 | `PERFWATCH` | Times every command while you work and warns when one is slow (stays on).    |
 | `PERFLOG`   | Shows the slowest commands that PERFWATCH recorded.                          |
@@ -29,12 +29,28 @@ It is a single AutoLISP file. Nothing has to be compiled, and it also works in p
 **Background programs**
 - What else is using CPU and RAM right now, for example antivirus, OneDrive / Dropbox / Desktop Connector, Windows Update, Search indexing, browsers, Teams. Each one comes with a specific tip.
 
+**Network**
+- Connected adapters: **Wi-Fi vs cable**, link speed (e.g. a 100 Mbps link from a bad cable or port), and **VPN**.
+- Which **file server** your drawing is on (including mapped drives) and the **ping time** to that server.
+
+**More Windows checks**
+- Page file: missing, or holding a lot of swapped-out memory.
+- Display scaling and the installed antivirus products (more than one scanner is flagged).
+- Whether Windows is **waiting for a restart** to finish updates, and how many programs start with Windows.
+
+**Add-ins / plugins / customization**
+- Third-party **ARX** modules, **plugin bundles** in all three ApplicationPlugins folders, the **Startup Suite**, and `acad.lsp` / `acaddoc.lsp` files.
+- **All code loaded inside acad.exe** that is not from Windows or Autodesk. This includes **.NET plugins loaded with NETLOAD**, as well as known troublemakers that inject themselves into programs: screen overlays (Discord, Steam, NVIDIA overlay, RivaTuner, OBS), security software, cloud-sync shell extensions, and mouse / window-management tools.
+- The number of LISP commands, LISP reactors and menu groups.
+- **Support file search path**: folders on the network or folders that no longer exist. Both slow down every file lookup.
+- **Command overhead benchmark**: runs a do-nothing command 200 times. If each one takes more than a few ms, an add-in or reactor is running code on every command.
+
 **The Civil 3D process**
 - Memory used by acad.exe, handle count, how long it has been running, and more than one copy running.
 
 **The drawing**
 - Object counts by type: COGO points, surfaces (with point count and out-of-date status), corridors, labels, pipes, hatches, images, PDF underlays, point clouds and **proxy objects**.
-- Bloat: **REGAPPs**, **annotation scale list**, **DGN linestyle junk**, layers, blocks, layouts.
+- Bloat: **REGAPPs**, **annotation scale list**, **DGN linestyle junk**, **layer filters**, layer states, groups, viewports, layers, blocks, layouts.
 - Xrefs, including any that are not found or not loaded.
 - File size, and objects placed absurdly far away.
 
@@ -89,9 +105,11 @@ To remove it, double-click `Uninstall.bat`.
 - Copy the `PerfCheck.bundle` folder to `%APPDATA%\Autodesk\ApplicationPlugins\`, **or**
 - Type `APPLOAD` and load `PerfCheck.bundle\Contents\PerfCheck.lsp`.
 
-When it loads, the command line shows `C3D PerfCheck 1.0.1 loaded: ...`.
+When it loads, the command line shows `C3D PerfCheck 1.1 loaded: ...`.
 
 ## How to track down stutter
+
+0. **Plugins?** Add ` /safemode` to the end of the Target box of your Civil 3D desktop shortcut (Properties). Start Civil 3D with it, which loads no add-ins, and run `PERFCHECK`. A big improvement in the score or the command overhead means a plugin is the cause. (If 2026 doesn't recognise `/safemode`, a fresh profile in OPTIONS > Profiles does the same job.)
 
 1. Run `PERFCHECK` **while it is stuttering**. Fix the HIGH items first.
 2. Restart Civil 3D (and Windows if the report says so), then run `PERFCHECK` again. If the score and stutter test are much better, the cause was the long session, memory, or background programs.

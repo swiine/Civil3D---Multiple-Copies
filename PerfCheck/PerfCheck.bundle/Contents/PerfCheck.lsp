@@ -28,7 +28,7 @@
 
 (vl-load-com)
 
-(setq *pc-version* "1.0.1")
+(setq *pc-version* "1.1")
 (setq *pc-dir* nil)
 
 ;;; ---------------------------------------------------------------- basics
@@ -427,14 +427,16 @@
                    (strcase (substr (getvar "DWGPREFIX") 1 2))))
   (setq *pc-netdrives* nil)
   (setq rows (pc:query svc
-               "SELECT DeviceID,FreeSpace,Size,DriveType FROM Win32_LogicalDisk WHERE DriveType = 3 OR DriveType = 4"
-               '("DeviceID" "FreeSpace" "Size" "DriveType")))
+               "SELECT DeviceID,FreeSpace,Size,DriveType,ProviderName FROM Win32_LogicalDisk WHERE DriveType = 3 OR DriveType = 4"
+               '("DeviceID" "FreeSpace" "Size" "DriveType" "ProviderName")))
+  (setq *pc-netmap* nil)
   (foreach r rows
     (setq id   (strcase (pc:str (pc:f r "DeviceID")))
           free (/ (pc:num (pc:f r "FreeSpace")) 1073741824.0)
           size (/ (pc:num (pc:f r "Size")) 1073741824.0))
     (if (= 4 (fix (pc:num (pc:f r "DriveType"))))
-      (setq *pc-netdrives* (cons id *pc-netdrives*))
+      (setq *pc-netdrives* (cons id *pc-netdrives*)
+            *pc-netmap* (cons (cons id (pc:str (pc:f r "ProviderName"))) *pc-netmap*))
       (progn
         (setq pct (if (> size 0) (* 100.0 (/ free size)) 100.0))
         (pc:kv (strcat "Drive " id) (strcat (rtos free 2 0) " GB free of " (rtos size 2 0) " GB ("
@@ -511,6 +513,7 @@
                '("ProcessId" "WorkingSetSize" "HandleCount" "ThreadCount" "CreationDate")))
   (setq n 0)
   (foreach r rows
+    (if (= n 0) (setq *pc-acadpid* (pc:r (pc:f r "ProcessId") 0)))
     (setq n   (1+ n)
           ws  (/ (pc:num (pc:f r "WorkingSetSize")) 1073741824.0)
           jd  (pc:wmidate (pc:f r "CreationDate"))
@@ -807,6 +810,7 @@
   (pc:kv "Registered apps (REGAPP)" (itoa regapps))
   (pc:kv "Annotation scales" (itoa scales))
   (pc:kv "DGN linestyle data" (itoa dgn))
+  (pc:check-drawing-more)
 
   (cond
     ((> regapps 2000)
@@ -892,6 +896,388 @@
         "Xrefs are read on open and on every reload. Keep XLOADCTL = 2 (works from a local copy) and unload xrefs you don't need.")
     )
   )
+)
+
+;;; ============================================================ NETWORK
+
+(defun pc:speed (bps)
+  (if (>= bps 1e9)
+    (strcat (rtos (/ bps 1e9) 2 1) " Gbps")
+    (strcat (rtos (/ bps 1e6) 2 0) " Mbps"))
+)
+
+;; UNC path (\\server\share\...) behind a drawing path, or nil if local
+(defun pc:unc-of (path / p)
+  (setq path (pc:str path))
+  (cond
+    ((wcmatch path "\\\\*") path)
+    ((setq p (assoc (strcase (substr path 1 2)) *pc-netmap*)) (cdr p))
+  )
+)
+
+(defun pc:host (unc / s p)
+  (setq s (substr unc 3))
+  (if (setq p (vl-string-search "\\" s)) (substr s 1 p) s)
+)
+
+(defun pc:ping (svc host count / r times)
+  (setq host (vl-string-trim " " (vl-string-translate "'\"" "  " host)))
+  (repeat count
+    (setq r (car (pc:query svc (strcat "SELECT StatusCode,ResponseTime FROM Win32_PingStatus WHERE Address='" host "'")
+                           '("StatusCode" "ResponseTime"))))
+    (if (and r (pc:f r "StatusCode") (= 0 (fix (pc:num (pc:f r "StatusCode")))))
+      (setq times (cons (pc:num (pc:f r "ResponseTime")) times)))
+  )
+  times
+)
+
+(defun pc:sys-network (svc full / rows nm u spd wifi wired vpn unc host times avg mx)
+  (pc:section "NETWORK")
+  (setq rows (pc:query svc
+               "SELECT Name,NetConnectionID,Speed FROM Win32_NetworkAdapter WHERE NetConnectionStatus = 2"
+               '("Name" "NetConnectionID" "Speed")))
+  (foreach r rows
+    (setq nm  (strcat (pc:str (pc:f r "NetConnectionID")) " - " (pc:str (pc:f r "Name")))
+          u   (strcase nm)
+          spd (pc:num (pc:f r "Speed")))
+    (cond
+      ((wcmatch u "*HYPER-V*,*VETHERNET*,*VMWARE*,*VIRTUALBOX*,*BLUETOOTH*,*LOOPBACK*,*WSL*") nil)
+      ((wcmatch u "*VPN*,*ANYCONNECT*,*FORTI*,*GLOBALPROTECT*,*PANGP*,*WIREGUARD*,*TAP-WINDOWS*,*ZSCALER*,*SONICWALL*,*PULSE SECURE*,*IVANTI*,*OPENVPN*,*NORDLYNX*,*TAILSCALE*,*ZEROTIER*")
+       (setq vpn (cons nm vpn)))
+      ((wcmatch u "*WI-FI*,*WIFI*,*WIRELESS*,*WLAN*,*802?11*")
+       (setq wifi (cons (list nm spd) wifi)))
+      (T (setq wired (cons (list nm spd) wired)))
+    )
+    (pc:kv "Connected adapter" (strcat nm (if (> spd 0) (strcat "  (" (pc:speed spd) ")") "")))
+  )
+  (if (null rows) (pc:out "  (no connected network adapters reported)"))
+  (foreach w wired
+    (if (and (> (cadr w) 0) (< (cadr w) 9e8))
+      (pc:issue (if *pc-dwg-unc* 2 1) (strcat "Wired network link is only " (pc:speed (cadr w)) " (" (car w) ")")
+        "A normal office link is 1 Gbps or more. 100 Mbps usually means a damaged/old cable, an old switch or wall port, or network-adapter power saving. Try another cable/port; in Device Manager > network adapter > Power Management, untick 'Allow the computer to turn off this device'.")))
+  ;; drawing on a file server?
+  (if (setq unc *pc-dwg-unc*)
+    (progn
+      (setq host (pc:host unc))
+      (pc:kv "Drawing file server" (strcat host "   (" unc ")"))
+      (setq times (pc:ping svc host (if full 4 2)))
+      (if times
+        (progn
+          (setq avg (/ (apply '+ times) (float (length times)))
+                mx  (apply 'max times))
+          (pc:kv "Ping to file server" (strcat (rtos avg 2 0) " ms average, " (rtos mx 2 0) " ms worst  (good office LAN: under 2 ms)"))
+          (cond
+            ((> avg 40)
+             (pc:issue 3 (strcat "The file server is far away: " (rtos avg 2 0) " ms ping")
+               "That is internet / VPN / other-office distance. Every save, autosave, xref and data-shortcut read takes many round trips, so it crawls. Work on a local copy of the project and copy it back, or ask IT about a WAN-friendly setup (Autodesk Docs, Panzura, Egnyte, a local server)."))
+            ((> avg 8)
+             (pc:issue 2 (strcat "Network delay to the file server is " (rtos avg 2 0) " ms")
+               "A healthy office network is under 2 ms. Higher values point to Wi-Fi, VPN, a remote office or an overloaded network. Use a cable, avoid VPN, or work on a local copy."))
+          )
+        )
+        (pc:kv "Ping to file server" "no answer (ping may be blocked - that's OK)")
+      )
+      (if (and wifi (null wired))
+        (pc:issue 3 "The drawing is on the network and this PC is on Wi-Fi"
+          "Wi-Fi adds delay and drops packets, and every save / autosave / xref load waits on it. Plug in an ethernet cable (and turn Wi-Fi off so Windows really uses the cable), or work on a local copy."))
+      (if vpn
+        (pc:issue 2 (strcat "VPN is connected (" (car vpn) ") and the drawing is on the network")
+          "Over VPN every file operation crosses the internet and the VPN encryption. Copy the project to your PC and work locally, then copy it back."))
+    )
+  )
+)
+
+;;; ========================================================= SYSTEM EXTRAS
+
+(defun pc:sys-extra (svc / r rows dpi sc names rb n cu)
+  (if (setq r (car (pc:query svc "SELECT Manufacturer,Model FROM Win32_ComputerSystem" '("Manufacturer" "Model"))))
+    (pc:kv "Computer" (strcat (pc:str (pc:f r "Manufacturer")) " " (pc:str (pc:f r "Model")))))
+  ;; page file
+  (setq rows (pc:query svc "SELECT Name,AllocatedBaseSize,CurrentUsage,PeakUsage FROM Win32_PageFileUsage"
+                       '("Name" "AllocatedBaseSize" "CurrentUsage" "PeakUsage"))
+        cu 0.0)
+  (if rows
+    (foreach r rows
+      (setq cu (+ cu (pc:num (pc:f r "CurrentUsage"))))
+      (pc:kv "Page file" (strcat (pc:str (pc:f r "Name")) ": " (rtos (/ (pc:num (pc:f r "AllocatedBaseSize")) 1024.0) 2 1)
+                                 " GB, in use " (rtos (/ (pc:num (pc:f r "CurrentUsage")) 1024.0) 2 1)
+                                 " GB, peak " (rtos (/ (pc:num (pc:f r "PeakUsage")) 1024.0) 2 1) " GB"))
+    )
+    (if (and *pc-ram-gb* (< *pc-ram-gb* 60))
+      (progn
+        (pc:kv "Page file" "NONE")
+        (pc:issue 2 "Windows has no page file"
+          "When RAM runs out Civil 3D will freeze or crash instead of just slowing down. Turn it back on: Settings > System > About > Advanced system settings > Performance Settings > Advanced > Virtual memory > 'Automatically manage paging file size'.")))
+  )
+  (if (> cu 3072)
+    (pc:issue 1 (strcat (rtos (/ cu 1024.0) 2 1) " GB of memory is swapped out to the page file")
+      "RAM ran short at some point, so Windows moved memory to disk. Switching back to those programs (or to Civil 3D) stutters while it is read back. Close what you don't need; more RAM is the real fix."))
+  ;; display scaling
+  (if (numberp (setq dpi (pc:try 'vl-registry-read '("HKEY_CURRENT_USER\\Control Panel\\Desktop\\WindowMetrics" "AppliedDPI"))))
+    (pc:kv "Display scaling" (strcat (rtos (* 100.0 (/ dpi 96.0)) 2 0) "%")))
+  ;; antivirus products
+  (setq sc (pc:wmi "root\\SecurityCenter2"))
+  (setq names (mapcar '(lambda (r) (pc:str (pc:f r "displayName")))
+                      (pc:query sc "SELECT displayName FROM AntiVirusProduct" '("displayName"))))
+  (if sc (pc:try 'vlax-release-object (list sc)))
+  (if names
+    (pc:kv "Antivirus" (apply 'strcat (mapcar '(lambda (x) (strcat x "  ")) names))))
+  (if (> (length names) 1)
+    (pc:issue 2 (strcat (itoa (length names)) " antivirus products are registered")
+      "Two real-time scanners scan every file twice and can fight each other. Keep one (usually the company one) and uninstall / disable the other."))
+  ;; pending restart
+  (setq rb (append (mapcar 'strcase (pc:try 'vl-registry-descendents
+                                      '("HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\WindowsUpdate\\Auto Update")))
+                   (mapcar 'strcase (pc:try 'vl-registry-descendents
+                                      '("HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Component Based Servicing")))))
+  (if (or (member "REBOOTREQUIRED" rb) (member "REBOOTPENDING" rb))
+    (progn
+      (pc:kv "Pending restart" "YES - Windows is waiting to finish updates")
+      (pc:issue 1 "Windows is waiting for a restart to finish updates"
+        "Until you restart, update services keep working in the background. Save your work and restart Windows.")))
+  ;; startup programs
+  (setq n (length (pc:query svc "SELECT Name FROM Win32_StartupCommand" '("Name"))))
+  (pc:kv "Programs starting with Windows" (itoa n))
+  (if (> n 20)
+    (pc:issue 1 (strcat (itoa n) " programs start with Windows")
+      "Many of them keep running in the background. Task Manager > Startup apps: disable the ones you don't need."))
+)
+
+;;; ========================================================= ADD-INS / PLUGINS
+
+(defun pc:adsk-path-p (u)
+  (or (and (wcmatch u "*\\AUTODESK\\*,*AUTODESK SHARED*") (not (wcmatch u "*APPLICATIONPLUGINS*")))
+      (wcmatch u "*APPLICATIONPLUGINS\\AUTODESK*,*APPLICATIONPLUGINS\\ADSK*"))
+)
+
+(defun pc:system-path-p (u / root)
+  (setq root (strcase (pc:str (getenv "SystemRoot"))))
+  (or (and (/= root "") (= (substr u 1 (1+ (strlen root))) (strcat root "\\")))
+      (wcmatch u "*\\DOTNET\\*,*\\MICROSOFT SHARED\\*,*\\WINDOWSAPPS\\*,*\\MICROSOFT\\EDGEWEBVIEW\\*,*\\MICROSOFT OFFICE\\*,*\\MICROSOFT\\EDGE*"))
+)
+
+(defun pc:module-tip (u)
+  (cond
+    ((wcmatch u "*GAMEOVERLAY*,*DISCORD*,*RTSSHOOKS*,*RIVATUNER*,*NVSPCAP*,*NVIDIA SHARE*,*GRAPHICS-HOOK*,*OBS-STUDIO*,*OVERWOLF*,*FRAPS*,*AFTERBURNER*,*XSPLIT*,*BANDICAM*,*MEDAL*")
+     (list 2 "a screen overlay / recorder (Discord, Steam, NVIDIA overlay, RivaTuner, OBS...) hooks into Civil 3D's graphics"
+             "Overlays intercept every frame Civil 3D draws and are a known cause of display stutter. Turn the overlay off (or exclude acad.exe in that app), e.g. NVIDIA app > Settings > In-game overlay OFF; Discord > Settings > Game Overlay OFF."))
+    ((wcmatch u "*CROWDSTRIKE*,*SENTINEL*,*CYLANCE*,*SYMANTEC*,*MCAFEE*,*TREND MICRO*,*SOPHOS*,*KASPERSKY*,*BITDEFENDER*,*ESET*,*CARBON BLACK*,*CBDEFENSE*,*TANIUM*,*MALWAREBYTES*,*WEBROOT*,*AVAST*,*AVG*,*DIGITAL GUARDIAN*,*FORCEPOINT*,*TRELLIX*,*CHECK POINT*,*NETSKOPE*,*CYBEREASON*")
+     (list 1 "security software has code loaded inside Civil 3D"
+             "Security tools that hook into programs check file and memory operations as they happen. If saves, opens or commands are slow, ask IT to add acad.exe and your project folders to the exclusions."))
+    ((wcmatch u "*DROPBOX*,*ONEDRIVE*,*FILESYNC*,*GOOGLE*DRIVE*,*BOX*SYNC*,*EGNYTE*,*DESKTOP CONNECTOR*")
+     (list 1 "a cloud-sync shell extension is loaded into Civil 3D"
+             "These load into every file dialog and can make Open/Save dialogs and file browsing slow, especially over the network."))
+    ((wcmatch u "*DISPLAYFUSION*,*ACTUAL WINDOW*,*WINDOWBLINDS*,*STARDOCK*,*LOGI*OPTIONS*,*LOGITECH*,*WACOM*,*3DCONNEXION*")
+     (list 1 "a mouse / window-management tool hooks into Civil 3D"
+             "Tools like DisplayFusion, Stardock, Logitech Options or 3Dconnexion drivers hook every window. Update them; if the lag stops when they are closed, keep them closed while working."))
+    ((wcmatch u "*TEAMVIEWER*,*ANYDESK*,*SPLASHTOP*")
+     (list 1 "a remote-control tool hooks into Civil 3D"
+             "Remote-control tools capture the screen. Close them when no one is connected."))
+  )
+)
+
+;; Every DLL loaded into acad.exe that is not from Windows or Autodesk.
+;; This finds .NET plugins loaded with NETLOAD too.
+(defun pc:addin-modules (svc / rows u dirs d a tips tip k)
+  (if *pc-acadpid*
+    (progn
+      (pc:progress "Listing code loaded inside Civil 3D")
+      (setq rows (pc:query svc (strcat "ASSOCIATORS OF {Win32_Process.Handle='" *pc-acadpid*
+                                       "'} WHERE ResultClass = CIM_DataFile")
+                           '("Name")))
+      (foreach r rows
+        (setq u (strcase (pc:str (pc:f r "Name"))))
+        (if (and (/= u "") (not (pc:system-path-p u)) (not (pc:adsk-path-p u)))
+          (progn
+            (setq d (vl-filename-directory u))
+            (if (setq a (assoc d dirs))
+              (setq dirs (subst (cons d (1+ (cdr a))) a dirs))
+              (setq dirs (cons (cons d 1) dirs)))
+            (if (and (setq tip (pc:module-tip u)) (not (assoc (cadr tip) tips)))
+              (setq tips (cons (list (cadr tip) (car tip) (caddr tip) u) tips)))
+          )
+        )
+      )
+      (pc:kv "Files loaded in acad.exe" (strcat (itoa (length rows)) " total, "
+                                               (itoa (apply '+ (mapcar 'cdr dirs)))
+                                               " from outside Windows / Autodesk"))
+      (if (null rows) (pc:out "    (could not list loaded files - WMI query was refused)"))
+      (if dirs
+        (progn
+          (pc:out "  Third-party code inside Civil 3D, by folder (includes NETLOAD-ed .NET plugins):")
+          (setq k 0)
+          (foreach x (reverse dirs)
+            (if (< k 40) (pc:out (strcat "    " (pc:pad (car x) 80) (itoa (cdr x)) " file(s)")))
+            (setq k (1+ k)))
+        )
+      )
+      (foreach x tips
+        (pc:issue (cadr x) (strcat "Found: " (car x))
+                  (strcat (caddr x) "  (File: " (cadddr x) ")")))
+      (setq *pc-thirdparty-dirs* (length dirs))
+    )
+  )
+)
+
+(defun pc:check-addins (svc full / arxs path third unknown bases d names b third-b key num i v suite lsps sup net missing
+                                     cmds rx tot objrx mg mgn)
+  (pc:section "ADD-INS / PLUGINS / CUSTOMIZATION")
+  ;; ARX / DBX
+  (setq arxs (pc:try 'arx nil) third nil unknown 0)
+  (foreach a arxs
+    (if (setq path (findfile a))
+      (if (not (pc:adsk-path-p (strcase path))) (setq third (cons path third)))
+      (setq unknown (1+ unknown))))
+  (pc:kv "ARX/DBX modules loaded" (strcat (itoa (length arxs)) "  (" (itoa (length third)) " not from Autodesk)"))
+  (foreach x third (pc:out (strcat "    third-party ARX: " x)))
+
+  ;; Auto-loading bundles
+  (setq bases (list (list "user" (getenv "APPDATA"))
+                    (list "all users" (getenv "ProgramData"))
+                    (list "Program Files" (getenv "ProgramFiles")))
+        third-b nil)
+  (foreach base bases
+    (if (cadr base)
+      (progn
+        (setq d (strcat (cadr base) "\\Autodesk\\ApplicationPlugins"))
+        (if (vl-file-directory-p d)
+          (foreach b (vl-remove-if '(lambda (x) (member x '("." ".."))) (vl-directory-files d nil -1))
+            (setq names (cons (strcat b "  [" (car base) "]") names))
+            (if (not (wcmatch (strcase b) "AUTODESK*,ADSK*,ACAD*,AUTOCAD*"))
+              (setq third-b (cons b third-b)))
+          )
+        )
+      )
+    )
+  )
+  (pc:kv "Plugin bundles (auto-load)" (strcat (itoa (length names)) "  (" (itoa (length third-b)) " not from Autodesk)"))
+  (foreach x (reverse names) (pc:out (strcat "    " x)))
+
+  ;; Startup Suite (APPLOAD > Contents)
+  (setq key (pc:try 'vlax-product-key nil))
+  (if key
+    (progn
+      (setq key (strcat "HKEY_CURRENT_USER\\" key "\\Profiles\\" (getvar "CPROFILE") "\\Dialogs\\Appload\\Startup")
+            num (atoi (pc:str (pc:try 'vl-registry-read (list key "NumStartup"))))
+            i 1)
+      (repeat num
+        (if (setq v (pc:try 'vl-registry-read (list key (strcat (itoa i) "Startup"))))
+          (setq suite (cons (pc:str v) suite)))
+        (setq i (1+ i)))
+    )
+  )
+  (pc:kv "Startup Suite (APPLOAD)" (itoa (length suite)))
+  (foreach x (reverse suite) (pc:out (strcat "    " x)))
+
+  ;; acad*.lsp auto-load files
+  (foreach f '("acad.lsp" "acaddoc.lsp" "acad2026.lsp" "acad2026doc.lsp")
+    (if (setq path (findfile f)) (setq lsps (cons path lsps))))
+  (pc:kv "Auto-load LISP files" (itoa (length lsps)))
+  (foreach x (reverse lsps) (pc:out (strcat "    " x)))
+  (pc:kv "ACADLSPASDOC" (pc:str (getvar "ACADLSPASDOC")))
+
+  ;; LISP commands, reactors, menus
+  (setq cmds (length (vl-remove-if-not '(lambda (s) (wcmatch s "C:*")) (atoms-family 1))))
+  (pc:kv "LISP commands defined" (itoa cmds))
+  (setq rx (pc:try 'vlr-reactors nil) tot 0 objrx 0)
+  (foreach g rx
+    (if (listp g)
+      (progn
+        (setq tot (+ tot (length (cdr g))))
+        (if (= (car g) :VLR-Object-Reactor) (setq objrx (+ objrx (length (cdr g)))))
+      )
+    )
+  )
+  (pc:kv "LISP reactors (this drawing)" (strcat (itoa tot) "  (" (itoa objrx) " object reactors)"))
+  (setq mg (pc:try 'vla-get-MenuGroups (list (pc:acad))) mgn nil)
+  (if mg (vlax-for g mg (setq mgn (cons (pc:str (pc:try 'vla-get-Name (list g))) mgn))))
+  (pc:kv "Menu groups (CUIx)" (strcat (itoa (length mgn)) "  " (apply 'strcat (mapcar '(lambda (x) (strcat x " ")) (reverse mgn)))))
+  (pc:kv "SECURELOAD" (pc:str (getvar "SECURELOAD")))
+
+  ;; Support file search path
+  (setq sup (vl-remove "" (mapcar '(lambda (x) (vl-string-trim " " x)) (pc:split (pc:str (getenv "ACAD")) ";")))
+        net nil missing nil)
+  (foreach p sup
+    (cond
+      ((pc:pathkind p) (setq net (cons p net)))
+      ((not (vl-file-directory-p p)) (setq missing (cons p missing)))
+    )
+  )
+  (pc:kv "Support search path" (strcat (itoa (length sup)) " folders, " (itoa (length net)) " on network/cloud, "
+                                        (itoa (length missing)) " missing"))
+  (foreach p (reverse net) (pc:out (strcat "    network: " p)))
+  (foreach p (reverse missing) (pc:out (strcat "    MISSING: " p)))
+
+  ;; Code loaded inside acad.exe (finds NETLOAD-ed plugins too)
+  (if (and svc full) (pc:addin-modules svc))
+
+  ;; ---- flags
+  (if (or third third-b (> (pc:n *pc-thirdparty-dirs*) 0) suite)
+    (pc:issue 1 "Third-party add-ins are loaded into Civil 3D"
+      (strcat "Found: " (itoa (length third)) " ARX, " (itoa (length third-b)) " plugin bundle(s), "
+              (itoa (length suite)) " Startup Suite file(s)"
+              (if *pc-thirdparty-dirs* (strcat ", " (itoa *pc-thirdparty-dirs*) " folder(s) of third-party code in acad.exe") "")
+              " (see ADD-INS section). Add-ins hook into commands, saves, selection and object changes, so a slow one makes everything lag. To test: add /safemode at the end of the Civil 3D desktop shortcut's Target, start Civil 3D with it, and compare (also compare the 'Command overhead' benchmark). Then turn add-ins back on one at a time.")))
+  (if net
+    (pc:issue 2 (strcat (itoa (length net)) " support path folder(s) are on the network")
+      "Civil 3D searches these folders every time it looks for a font, linetype, hatch pattern, block, menu, LISP or template. Over a slow network that adds delay everywhere. Move them to the BOTTOM of OPTIONS > Files > Support File Search Path, or copy those files to a local folder."))
+  (if missing
+    (pc:issue (if (vl-some 'pc:pathkind missing) 2 1) (strcat (itoa (length missing)) " support path folder(s) don't exist")
+      "Missing folders (especially old network paths) are re-tried on every file search, and a missing network path can wait for a timeout each time. Remove them in OPTIONS > Files > Support File Search Path."))
+  (if (> objrx 2000)
+    (pc:issue 2 (strcat (itoa objrx) " LISP object reactors in this drawing")
+      "A LISP routine is watching thousands of objects; every change fires code. Find which routine creates them (usually an add-in that 'links' objects) and update or remove it."))
+  (if (> cmds 2000)
+    (pc:issue 1 (strcat (itoa cmds) " LISP commands loaded")
+      "Loading this many LISP routines into every drawing slows opening drawings. Load rarely used tools on demand (autoload) instead of in acaddoc.lsp / the Startup Suite."))
+)
+
+;;; ================================================== MORE DRAWING CHECKS
+
+(defun pc:layer-xdict-count (name / tbl xd d)
+  (setq tbl (cdr (assoc 330 (entget (tblobjname "LAYER" "0")))))
+  (if (and tbl
+           (setq xd (cdr (assoc 360 (member '(102 . "{ACAD_XDICTIONARY") (entget tbl)))))
+           (setq d (dictsearch xd name)))
+    (length (vl-remove-if-not '(lambda (x) (= (car x) 3)) d))
+    0
+  )
+)
+
+(defun pc:check-drawing-more (/ lf ls grp vp)
+  (setq lf  (+ (pc:n (pc:try 'pc:layer-xdict-count '("ACAD_LAYERFILTERS")))
+               (pc:n (pc:try 'pc:layer-xdict-count '("ACLYDICTIONARY"))))
+        ls  (pc:n (pc:try 'pc:layer-xdict-count '("ACAD_LAYERSTATES")))
+        grp (pc:dictcount "ACAD_GROUP")
+        vp  (pc:count '((0 . "VIEWPORT"))))
+  (pc:kv "Layer filters" (itoa lf))
+  (pc:kv "Layer states" (itoa ls))
+  (pc:kv "Groups" (itoa grp))
+  (pc:kv "Viewports" (itoa vp))
+  (if (> lf 100)
+    (pc:issue 2 (strcat (itoa lf) " layer filters (layer filter bloat)")
+      "Layer filters pile up when drawings with filters are xref'd or copied in, and they slow down the Layer Properties Manager, layer commands and opening. Delete the junk ones in Layer Properties Manager (right-click a filter > Delete), or use a layer filter cleanup tool."))
+  (if (> ls 200)
+    (pc:issue 1 (strcat (itoa ls) " layer states")
+      "Delete old layer states in LAYERSTATE."))
+  (if (> grp 2000)
+    (pc:issue 1 (strcat (itoa grp) " groups")
+      "Thousands of groups (often unnamed ones from copy/paste or imports) slow selection. Use GROUPEDIT / the Group Manager to remove ones you don't need."))
+  (if (> vp 200)
+    (pc:issue 1 (strcat (itoa vp) " viewports")
+      "Every viewport has to be drawn. Split sheets into separate drawings or a sheet set."))
+)
+
+;;; =============================================== COMMAND OVERHEAD TEST
+
+;; Runs a do-nothing command 200 times. Add-ins and reactors that run code on
+;; every command show up here as extra milliseconds per command.
+(defun pc:bench-cmd (/ old t0 d)
+  (setq old (getvar "USERI5") t0 (pc:ms))
+  (repeat 200 (command "_.SETVAR" "USERI5" 1))
+  (setq d (pc:since t0))
+  (setvar "USERI5" old)
+  (/ d 200.0)
 )
 
 ;;; ================================================================ SETTINGS
@@ -1168,6 +1554,20 @@
        "Freeze layers you don't need, use lighter surface / point / label styles while working, and unload xrefs or images you don't need."))
   )
 
+  ;; COMMAND OVERHEAD
+  (pc:progress "Timing command overhead")
+  (setq l (pc:bench-cmd))
+  (pc:setres "cmd" l)
+  (pc:kv "Command overhead" (strcat (rtos l 2 1) " ms per command  (200 do-nothing commands)"))
+  (cond
+    ((> l 40)
+     (pc:issue 3 (strcat "Every command costs about " (rtos l 2 0) " ms before it even starts")
+       "A do-nothing command should take only a few ms. Something runs code on every command - almost always an add-in / plugin or a LISP reactor. See the ADD-INS section, then test with /safemode (add it to the end of the Civil 3D shortcut's Target) and turn add-ins back on one at a time."))
+    ((> l 15)
+     (pc:issue 2 (strcat "Every command costs about " (rtos l 2 0) " ms of overhead")
+       "A do-nothing command should take only a few ms. Add-ins or LISP reactors that react to every command are the usual reason. See the ADD-INS section and compare with a /safemode start."))
+  )
+
   (if full
     (progn
       ;; ZOOM
@@ -1303,6 +1703,8 @@
     "  9. Restart Civil 3D once a day and Windows at least once a week."
     " 10. Turn PERFWATCH on, work normally, then run PERFLOG to see exactly which"
     "     commands are slow."
+    " 11. Plugins: add /safemode to the end of the Civil 3D shortcut's Target to start"
+    "     without add-ins, run PERFCHECK again and compare the scores."
   )
 )
 
@@ -1402,13 +1804,13 @@
   (if (setq f (open fn "a"))
     (progn
       (if new
-        (write-line "Date,Computer,Drawing,Score,CPU_ms,DB_ms,Regen_ms,Zoom_ms,Stutter_spikes,Temp_ms_per_file,Dwg_ms_per_file,Objects,High,Med,Low,Mode" f))
+        (write-line "Date,Computer,Drawing,Score,CPU_ms,DB_ms,Regen_ms,Zoom_ms,Stutter_spikes,Temp_ms_per_file,Dwg_ms_per_file,Objects,High,Med,Low,Mode,Cmd_ms" f))
       (write-line (strcat (pc:now "YYYY-MO-DD HH:MM") "," (pc:csv (getenv "COMPUTERNAME")) ","
                           (pc:csv (getvar "DWGNAME")) "," (itoa score) ","
                           (pc:res "cpu") "," (pc:res "db") "," (pc:res "regen") "," (pc:res "zoom") ","
                           (pc:res "spikes") "," (pc:res "lat-temp") "," (pc:res "lat-dwg") ","
                           (itoa (pc:n *pc-ents*)) "," (itoa h) "," (itoa m) "," (itoa l) ","
-                          (if full "full" "quick"))
+                          (if full "full" "quick") "," (pc:res "cmd"))
                   f)
       (close f)
     )
@@ -1422,10 +1824,11 @@
   (setq *pc-lines* nil *pc-issues* nil *pc-res* nil *pc-fixes* nil
         *pc-ram-gb* nil *pc-logical* nil *pc-netdrives* nil *pc-cnt* nil *pc-ents* nil
         *pc-xpaths* nil *pc-xrefs* nil *pc-laptop* nil *pc-cpuperf* nil
+        *pc-netmap* nil *pc-acadpid* nil *pc-thirdparty-dirs* nil *pc-dwg-unc* nil
         t0 (pc:ms))
   (princ (strcat "\nC3D PerfCheck " *pc-version*
                  (if full
-                   " - full check. Takes about 30-60 seconds; the screen will regen and zoom. Please wait..."
+                   " - full check. Takes about 1-2 minutes; the screen will regen and zoom. Please wait..."
                    " - quick check. Please wait...")))
   (pc:progress "Reading Windows and hardware info")
   (setq svc (pc:wmi "root\\cimv2"))
@@ -1436,9 +1839,12 @@
       (pc:sys-power svc)
       (pc:sys-gpu svc)
       (pc:sys-disk svc)
+      (pc:sys-extra svc)
+      (pc:progress "Checking the network")
+      (setq *pc-dwg-unc* (if (= 1 (getvar "DWGTITLED")) (pc:unc-of (getvar "DWGPREFIX"))))
+      (pc:sys-network svc full)
       (pc:progress "Checking what else is running")
       (pc:sys-procs svc)
-      (pc:try 'vlax-release-object (list svc))
     )
     (progn
       (pc:section "WINDOWS / HARDWARE")
@@ -1449,6 +1855,9 @@
   (pc:check-drawing)
   (pc:check-paths)
   (pc:check-settings)
+  (pc:progress "Checking add-ins and plugins")
+  (pc:check-addins svc full)
+  (if svc (pc:try 'vlax-release-object (list svc)))
   (pc:benchmarks full)
   (pc:out "")
   (pc:out (strcat "(PerfCheck took " (pc:sec (pc:since t0)) ")"))
