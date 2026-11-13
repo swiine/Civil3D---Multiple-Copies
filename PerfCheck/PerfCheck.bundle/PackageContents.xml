@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ApplicationPackage SchemaVersion="1.0"
+                    AutodeskProduct="AutoCAD"
+                    ProductType="Application"
+                    Name="C3D PerfCheck"
+                    Description="Performance check, benchmark and lag diagnosis for Civil 3D / AutoCAD"
+                    AppVersion="1.0.0"
+                    ProductCode="{F2442314-94CD-4730-BC26-D45F9BDFEFB6}"
+                    UpgradeCode="{D3559E59-07EB-4375-BF12-94E528644C44}">
+  <CompanyDetails Name="C3D PerfCheck" />
+  <Components>
+    <RuntimeRequirements OS="Win64" Platform="AutoCAD*" SeriesMin="R24.0" SeriesMax="R25.9" />
+    <ComponentEntry AppName="C3DPerfCheck"
+                    ModuleName="./Contents/PerfCheck.lsp"
+                    AppDescription="PERFCHECK / PERFQUICK / PERFWATCH / PERFLOG / PERFFIX"
+                    LoadOnAutoCADStartup="True"
+                    PerDocument="True" />
+  </Components>
+</ApplicationPackage>

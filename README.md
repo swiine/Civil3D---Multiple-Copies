@@ -1,5 +1,7 @@
 # MultiClip for Civil 3D 2026
 
+> **Also in this repo:** [C3D PerfCheck](PerfCheck/README.md) is a benchmark and lag / stutter finder for Civil 3D. Download `PerfCheck/PerfCheck.zip`.
+
 Nine numbered clipboards in place of one. Copy several things in one drawing, switch to the other drawing once, and paste them all.
 
 ```
