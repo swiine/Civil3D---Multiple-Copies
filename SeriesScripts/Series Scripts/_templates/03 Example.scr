@@ -1,0 +1,6 @@
+; 03 Example.scr - an example series script, as an AutoCAD script, for 03xxx drawings.
+; To use it, rename it for its series, copy it up one folder (into "Series Scripts") and put
+; your commands in below. Lines starting with ; are comments. Series Scripts saves the drawing
+; afterwards - don't QSAVE, CLOSE or QUIT here.
+; The LISP variables ttw-dwg-number, ttw-series and ttw-series-name are set, e.g. !ttw-dwg-number
+(princ (strcat "\n" ttw-series-name " script on " ttw-dwg-number))

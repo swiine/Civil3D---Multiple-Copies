@@ -1,5 +1,7 @@
 # MultiClip for Civil 3D 2026
 
+> Also in this repo: **[Series Scripts](SeriesScripts/README.md)** runs a script on each drawing chosen by its drawing-number series (01xxx Siteworks, 02xxx Erosion and Sediment Control...), in the background. Download `SeriesScripts.zip`.
+
 Nine numbered clipboards in place of one. Copy several things in one drawing, switch to the other drawing once, and paste them all.
 
 ```
