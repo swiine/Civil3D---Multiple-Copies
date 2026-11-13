@@ -89,7 +89,7 @@ To remove it, double-click `Uninstall.bat`.
 - Copy the `PerfCheck.bundle` folder to `%APPDATA%\Autodesk\ApplicationPlugins\`, **or**
 - Type `APPLOAD` and load `PerfCheck.bundle\Contents\PerfCheck.lsp`.
 
-When it loads, the command line shows `C3D PerfCheck 1.0 loaded: ...`.
+When it loads, the command line shows `C3D PerfCheck 1.0.1 loaded: ...`.
 
 ## How to track down stutter
 

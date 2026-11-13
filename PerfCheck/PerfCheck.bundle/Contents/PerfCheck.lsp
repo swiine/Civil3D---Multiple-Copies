@@ -28,7 +28,8 @@
 
 (vl-load-com)
 
-(setq *pc-version* "1.0")
+(setq *pc-version* "1.0.1")
+(setq *pc-dir* nil)
 
 ;;; ---------------------------------------------------------------- basics
 
@@ -44,11 +45,27 @@
 (defun pc:n (x) (if (numberp x) x 0))
 (defun pc:now (fmt) (menucmd (strcat "M=$(edtime,$(getvar,date)," fmt ")")))
 
-(defun pc:dir (/ root dir)
-  (setq root (or (getenv "LOCALAPPDATA") (getenv "TEMP") (getvar "TEMPPREFIX")))
-  (setq dir (strcat (vl-string-right-trim "\\/" root) "\\C3D-PerfCheck"))
-  (if (not (vl-file-directory-p dir)) (vl-mkdir dir))
-  dir
+(defun pc:dir (/ dir)
+  (if (not *pc-dir*)
+    (foreach root (list (getenv "LOCALAPPDATA") (getenv "TEMP") (getvar "TEMPPREFIX")
+                        (getvar "MYDOCUMENTSPREFIX"))
+      (if (and (not *pc-dir*) (= (type root) 'STR) (/= root ""))
+        (progn
+          (setq dir (strcat (vl-string-right-trim "\\/" root) "\\C3D-PerfCheck"))
+          (if (not (vl-file-directory-p dir)) (vl-mkdir dir))
+          (if (vl-file-directory-p dir) (setq *pc-dir* dir))
+        )
+      )
+    )
+  )
+  (if *pc-dir* *pc-dir* (vl-string-right-trim "\\/" (getvar "TEMPPREFIX")))
+)
+
+;; Date/time stamp safe for file names, e.g. 20261113-142530 (no DIESEL)
+(defun pc:stamp (/ s)
+  (setq s (rtos (getvar "CDATE") 2 6))
+  (while (< (strlen s) 15) (setq s (strcat s "0")))
+  (strcat (substr s 1 8) "-" (substr s 10 6))
 )
 
 ;; Any value (number, string, variant) -> real. Unknown -> 0.0
@@ -1327,8 +1344,15 @@
   (setq head (reverse head))
 
   ;; ---- write the file
-  (setq fn (strcat (pc:dir) "\\PerfReport_" (pc:now "YYYYMODD-HHMMSS") ".txt"))
-  (if (setq f (open fn "w"))
+  (setq fn (strcat (pc:dir) "\\PerfReport_" (pc:stamp) ".txt"))
+  (if (not (setq f (open fn "w")))
+    (progn
+      (princ (strcat "\nCould not write " fn " - trying the temp folder."))
+      (setq fn (strcat (vl-string-right-trim "\\/" (getvar "TEMPPREFIX")) "\\PerfReport_" (pc:stamp) ".txt")
+            f  (open fn "w"))
+    )
+  )
+  (if f
     (progn
       (foreach x head (write-line x f))
       (foreach x (reverse *pc-lines*) (write-line x f))
