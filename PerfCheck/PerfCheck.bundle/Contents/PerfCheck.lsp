@@ -28,7 +28,7 @@
 
 (vl-load-com)
 
-(setq *pc-version* "1.1")
+(setq *pc-version* "1.2")
 (setq *pc-dir* nil)
 
 ;;; ---------------------------------------------------------------- basics
@@ -200,10 +200,26 @@
 
 ;;; ------------------------------------------------------------------- WMI
 
-(defun pc:wmi (ns / loc svc)
-  (if (setq loc (pc:try 'vlax-create-object '("WbemScripting.SWbemLocator")))
+(defun pc:wmi (ns / loc svc r)
+  (setq loc (vl-catch-all-apply 'vlax-create-object '("WbemScripting.SWbemLocator")))
+  (if (or (null loc) (vl-catch-all-error-p loc))
     (progn
-      (setq svc (pc:try 'vlax-invoke-method (list loc 'ConnectServer "." ns)))
+      (setq *pc-wmi-err* (if loc (vl-catch-all-error-message loc) "could not create WbemScripting.SWbemLocator"))
+      nil
+    )
+    (progn
+      (foreach try (list (list 'vlax-invoke        loc 'ConnectServer nil ns)
+                         (list 'vlax-invoke        loc 'ConnectServer "." ns)
+                         (list 'vlax-invoke-method loc 'ConnectServer "." ns))
+        (if (null svc)
+          (progn
+            (setq r (vl-catch-all-apply (car try) (cdr try)))
+            (if (or (vl-catch-all-error-p r) (null r))
+              (setq *pc-wmi-err* (if r (vl-catch-all-error-message r) "ConnectServer returned nothing"))
+              (setq svc r))
+          )
+        )
+      )
       (pc:try 'vlax-release-object (list loc))
       svc
     )
@@ -219,7 +235,8 @@
 ;; Run a WQL query. Returns a list of rows; each row is (("Prop" . value) ...)
 (defun pc:query (svc wql props / rows coll)
   (setq rows nil)
-  (if (and svc (setq coll (pc:try 'vlax-invoke-method (list svc 'ExecQuery wql))))
+  (if (and svc (setq coll (or (pc:try 'vlax-invoke (list svc 'ExecQuery wql))
+                              (pc:try 'vlax-invoke-method (list svc 'ExecQuery wql)))))
     (progn
       (vl-catch-all-apply
         '(lambda ()
@@ -786,12 +803,14 @@
   (pc:progress "Checking drawing bloat")
   (setq regapps (pc:tblcount "APPID")
         layers  (pc:tblcount "LAYER")
-        r (tblnext "BLOCK" T) blocks 0 xrefs 0 xunres 0 *pc-xpaths* nil)
+        r (tblnext "BLOCK" T) blocks 0 xrefs 0 xunres 0 *pc-xpaths* nil
+        *pc-xinfo* nil *pc-xref-net-mb* 0.0 *pc-xref-mb* 0.0)
   (while r
     (setq blocks (1+ blocks) f (cdr (assoc 70 r)))
     (if (= 4 (logand f 4))
       (progn
         (setq xrefs (1+ xrefs) *pc-xpaths* (cons (pc:str (cdr (assoc 1 r))) *pc-xpaths*))
+        (pc:xref-add (cdr (assoc 2 r)) (cdr (assoc 1 r)))
         (if (= 0 (logand f 32)) (setq xunres (1+ xunres)))
       )
     )
@@ -805,7 +824,17 @@
         *pc-xrefs* xrefs)
   (pc:kv "Layers" (itoa layers))
   (pc:kv "Block definitions" (itoa blocks))
-  (pc:kv "Xrefs" (strcat (itoa xrefs) (if (> xunres 0) (strcat "  (" (itoa xunres) " not loaded / not found)") "")))
+  (pc:kv "Xrefs" (strcat (itoa xrefs) (if (> xunres 0) (strcat "  (" (itoa xunres) " not loaded / not found)") "")
+                         (if (> xrefs 0) (strcat ", " (rtos *pc-xref-mb* 2 1) " MB in total") "")))
+  (foreach x (reverse *pc-xinfo*)
+    (pc:out (strcat "    " (pc:pad (car x) 32)
+                    (pc:lpad (if (caddr x) (strcat (rtos (caddr x) 2 1) " MB") "not found") 10)
+                    "  " (cadr x) (if (cadddr x) (strcat "   <-- " (cadddr x)) ""))))
+  (if (> xrefs 0)
+    (pc:out "    (Objects inside xrefs are not counted here. Open an xref and run PERFCHECK in it to check it too.)"))
+  (if (> *pc-xref-mb* 150)
+    (pc:issue 1 (strcat "Xrefs add up to " (rtos *pc-xref-mb* 2 0) " MB")
+      "Everything in the xrefs is loaded and drawn too. Unload xrefs you don't need, XCLIP them to the area of the sheet, and keep the heavy models (surfaces, corridors) lean."))
   (pc:kv "Layouts" (itoa layouts))
   (pc:kv "Registered apps (REGAPP)" (itoa regapps))
   (pc:kv "Annotation scales" (itoa scales))
@@ -888,12 +917,12 @@
     )
   )
   (setq n 0)
-  (foreach x *pc-xpaths* (if (pc:pathkind x) (setq n (1+ n))))
+  (foreach x *pc-xinfo* (if (cadddr x) (setq n (1+ n))))
   (if (> n 0)
     (progn
-      (pc:kv "Xrefs on network / cloud" (itoa n))
-      (pc:issue 1 (strcat (itoa n) " xref(s) are on a network or cloud location")
-        "Xrefs are read on open and on every reload. Keep XLOADCTL = 2 (works from a local copy) and unload xrefs you don't need.")
+      (pc:kv "Xrefs on network / cloud" (strcat (itoa n) "  (" (rtos *pc-xref-net-mb* 2 1) " MB)"))
+      (pc:issue 1 (strcat (itoa n) " xref(s) (" (rtos *pc-xref-net-mb* 2 0) " MB) are on a network or cloud location")
+        "Xrefs are read over the network on open and on every reload. Keep XLOADCTL = 2 (works from a local copy) and unload xrefs you don't need. See the BENCHMARKS section for how long loading them takes at your network speed.")
     )
   )
 )
@@ -1046,7 +1075,8 @@
 ;;; ========================================================= ADD-INS / PLUGINS
 
 (defun pc:adsk-path-p (u)
-  (or (and (wcmatch u "*\\AUTODESK\\*,*AUTODESK SHARED*") (not (wcmatch u "*APPLICATIONPLUGINS*")))
+  (or (wcmatch u "*\\PROGRAM FILES\\AUTODESK\\*")
+      (and (wcmatch u "*\\AUTODESK\\*,*AUTODESK SHARED*") (not (wcmatch u "*APPLICATIONPLUGINS*")))
       (wcmatch u "*APPLICATIONPLUGINS\\AUTODESK*,*APPLICATIONPLUGINS\\ADSK*"))
 )
 
@@ -1142,9 +1172,12 @@
         (setq d (strcat (cadr base) "\\Autodesk\\ApplicationPlugins"))
         (if (vl-file-directory-p d)
           (foreach b (vl-remove-if '(lambda (x) (member x '("." ".."))) (vl-directory-files d nil -1))
-            (setq names (cons (strcat b "  [" (car base) "]") names))
-            (if (not (wcmatch (strcase b) "AUTODESK*,ADSK*,ACAD*,AUTOCAD*"))
-              (setq third-b (cons b third-b)))
+            ;; Program Files bundles need an admin install - normally Autodesk add-ons
+            (if (and (/= (car base) "Program Files")
+                     (not (wcmatch (strcase b) "AUTODESK*,ADSK*,ACAD*,AUTOCAD*")))
+              (setq third-b (cons b third-b)
+                    names (cons (strcat b "  [" (car base) ", third-party]") names))
+              (setq names (cons (strcat b "  [" (car base) "]") names)))
           )
         )
       )
@@ -1278,6 +1311,53 @@
   (setq d (pc:since t0))
   (setvar "USERI5" old)
   (/ d 200.0)
+)
+
+
+;; Resolve an xref path (absolute, relative or bare name) to a full path
+(defun pc:xref-full (p)
+  (setq p (pc:str p))
+  (cond
+    ((= p "") nil)
+    ((or (wcmatch p "\\\\*") (wcmatch p "?:*")) p)
+    ((findfile p))
+    (T (strcat (getvar "DWGPREFIX") (vl-string-left-trim "\\" p)))
+  )
+)
+
+;; Record one xref: (name full-path size-MB location-kind)
+(defun pc:xref-add (name path / full sz kind)
+  (setq full (pc:xref-full path)
+        sz   (if full (vl-file-size full))
+        sz   (if sz (/ sz 1048576.0))
+        kind (pc:pathkind (if full full path)))
+  (setq *pc-xinfo* (cons (list (pc:str name) (pc:str (if full full path)) sz kind) *pc-xinfo*))
+  (if sz
+    (progn
+      (setq *pc-xref-mb* (+ *pc-xref-mb* sz))
+      (if kind (setq *pc-xref-net-mb* (+ *pc-xref-net-mb* sz)))
+    )
+  )
+)
+
+;; Turn the measured drawing-folder speed into "how long you wait" numbers
+(defun pc:estimate-times (mbps / sv xl)
+  (if (and *pc-dwgmb* (> *pc-dwgmb* 0))
+    (progn
+      (setq sv (/ *pc-dwgmb* mbps))
+      (pc:kv "  Estimated save time" (strcat (rtos sv 2 1) " s to write this " (rtos *pc-dwgmb* 2 1) " MB drawing (plus its .bak)"))
+    )
+  )
+  (if (and *pc-xref-net-mb* (> *pc-xref-net-mb* 0))
+    (progn
+      (setq xl (/ *pc-xref-net-mb* mbps))
+      (pc:kv "  Estimated xref load" (strcat (rtos xl 2 1) " s to read " (rtos *pc-xref-net-mb* 2 1) " MB of network xrefs"))
+      (if (> xl 10)
+        (pc:issue 2 (strcat "Loading the xrefs over this network takes about " (rtos xl 2 0) " s")
+          (strcat "At the measured " (rtos mbps 2 1) " MB/s, opening this drawing, reloading xrefs and REGENALL wait on the network for the "
+                  (rtos *pc-xref-net-mb* 2 0) " MB of xrefs. Fix the network speed (see the drawing-folder items), unload xrefs you don't need, or work on a local copy of the project.")))
+    )
+  )
 )
 
 ;;; ================================================================ SETTINGS
@@ -1651,6 +1731,8 @@
                    (pc:issue 2 (strcat (car x) " storage is slow (" (rtos lat 2 0) " ms per file)")
                      "A local SSD normally takes under 2 ms. Network, cloud sync or antivirus scanning add delay to every save and autosave."))
                 )
+                (if (and (= (car x) "Drawing folder") (or mbps (and cp (<= cp 15))))
+                  (pc:estimate-times (if mbps mbps 500.0)))
                 (if (and mbps (< mbps 30))
                   (pc:issue 2 (strcat (car x) ": file copy only " (rtos mbps 2 0) " MB/s")
                     "Opening and saving large drawings here will be slow. Work on a local SSD copy if possible."))
@@ -1825,6 +1907,7 @@
         *pc-ram-gb* nil *pc-logical* nil *pc-netdrives* nil *pc-cnt* nil *pc-ents* nil
         *pc-xpaths* nil *pc-xrefs* nil *pc-laptop* nil *pc-cpuperf* nil
         *pc-netmap* nil *pc-acadpid* nil *pc-thirdparty-dirs* nil *pc-dwg-unc* nil
+        *pc-wmi-err* nil *pc-xinfo* nil *pc-xref-mb* 0.0 *pc-xref-net-mb* 0.0 *pc-dwgmb* nil
         t0 (pc:ms))
   (princ (strcat "\nC3D PerfCheck " *pc-version*
                  (if full
@@ -1848,7 +1931,18 @@
     )
     (progn
       (pc:section "WINDOWS / HARDWARE")
-      (pc:out "  Could not read system info (Windows WMI is not available or blocked).")
+      (pc:out "  Could not read Windows system info through WMI.")
+      (pc:out (strcat "  Reason: " (pc:str *pc-wmi-err*)))
+      (pc:out "  Without WMI these sections are skipped: RAM, graphics card/driver, power, disks,")
+      (pc:out "  network (Wi-Fi/VPN/ping), background programs and the acad.exe process.")
+      (pc:out "  Your IT department may block WMI for normal users - ask them, or check those")
+      (pc:out "  things by hand in Task Manager (Performance and Processes tabs).")
+      (pc:kv "CPU (from Windows)" (strcat (pc:str (getenv "PROCESSOR_IDENTIFIER")) ", "
+                                          (pc:str (getenv "NUMBER_OF_PROCESSORS")) " logical processors"))
+      (pc:kv "Computer" (pc:str (getenv "COMPUTERNAME")))
+      (pc:issue 1 "Windows system checks were blocked (WMI)"
+        (strcat "PerfCheck could not read RAM, graphics, network, Wi-Fi/VPN and background programs (" (pc:str *pc-wmi-err*)
+                "). Check them by hand in Task Manager, or ask IT whether WMI is blocked for your user."))
     )
   )
   (pc:progress "Scanning the drawing")

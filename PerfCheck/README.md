@@ -51,7 +51,7 @@ It is a single AutoLISP file. Nothing has to be compiled, and it also works in p
 **The drawing**
 - Object counts by type: COGO points, surfaces (with point count and out-of-date status), corridors, labels, pipes, hatches, images, PDF underlays, point clouds and **proxy objects**.
 - Bloat: **REGAPPs**, **annotation scale list**, **DGN linestyle junk**, **layer filters**, layer states, groups, viewports, layers, blocks, layouts.
-- Xrefs, including any that are not found or not loaded.
+- Xrefs: each xref's size and location, any that are not found or not loaded, and how long loading the network ones takes at your measured network speed.
 - File size, and objects placed absurdly far away.
 
 **File locations**
@@ -105,7 +105,7 @@ To remove it, double-click `Uninstall.bat`.
 - Copy the `PerfCheck.bundle` folder to `%APPDATA%\Autodesk\ApplicationPlugins\`, **or**
 - Type `APPLOAD` and load `PerfCheck.bundle\Contents\PerfCheck.lsp`.
 
-When it loads, the command line shows `C3D PerfCheck 1.1 loaded: ...`.
+When it loads, the command line shows `C3D PerfCheck 1.2 loaded: ...`.
 
 ## How to track down stutter
 
@@ -119,5 +119,5 @@ When it loads, the command line shows `C3D PerfCheck 1.1 loaded: ...`.
 ## Notes
 
 - PERFCHECK regenerates and zooms the drawing during the benchmarks, then zooms back. The database test makes 2000 temporary lines on layer 0 and deletes them again. It is skipped if layer 0 is locked or frozen. Use `U` afterwards if you want to remove the undo entries.
-- System information comes from Windows WMI. If your IT department blocks WMI, the drawing, settings and benchmark parts still work.
+- System information comes from Windows WMI. If your IT department blocks WMI, the report says why, and the drawing, settings, add-in and benchmark parts still work.
 - Benchmark numbers are timed from inside Civil 3D with a timer that is accurate to about 16 ms, so treat small differences as noise. Comparing runs on the same PC (History.csv) is what matters.
