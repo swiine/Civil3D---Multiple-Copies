@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flying Cat</title>
+<style>
+  :root {
+    --sky-top: #6ec6ff;
+    --sky-bottom: #d7f0ff;
+    --cloud: #ffffff;
+    --fur: #f4a340;
+    --fur-dark: #d9822b;
+    --cape: #e63946;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    overflow: hidden;
+    background: linear-gradient(var(--sky-top), var(--sky-bottom));
+    font-family: system-ui, sans-serif;
+  }
+
+  /* ---------- Clouds ---------- */
+  .cloud {
+    position: absolute;
+    left: 100%;
+    width: 160px;
+    height: 50px;
+    background: var(--cloud);
+    border-radius: 50px;
+    opacity: .9;
+    animation: drift linear infinite;
+  }
+  .cloud::before, .cloud::after {
+    content: "";
+    position: absolute;
+    background: var(--cloud);
+    border-radius: 50%;
+  }
+  .cloud::before { width: 70px; height: 70px; top: -35px; left: 25px; }
+  .cloud::after  { width: 90px; height: 90px; top: -50px; left: 60px; }
+
+  .c1 { top: 12%; animation-duration: 9s;  transform: scale(1);   }
+  .c2 { top: 35%; animation-duration: 14s; animation-delay: -5s; transform: scale(.6); opacity: .7; }
+  .c3 { top: 65%; animation-duration: 7s;  animation-delay: -2s; transform: scale(1.3); }
+  .c4 { top: 82%; animation-duration: 12s; animation-delay: -8s; transform: scale(.8); opacity: .8; }
+  .c5 { top: 50%; animation-duration: 18s; animation-delay: -11s; transform: scale(.5); opacity: .6; }
+
+  @keyframes drift {
+    from { left: 110%; }
+    to   { left: -300px; }
+  }
+
+  /* ---------- Speed lines ---------- */
+  .line {
+    position: absolute;
+    height: 3px;
+    width: 120px;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,.9));
+    border-radius: 3px;
+    animation: zoom .9s linear infinite;
+  }
+  @keyframes zoom {
+    from { transform: translateX(0);     opacity: 1; }
+    to   { transform: translateX(-60vw); opacity: 0; }
+  }
+
+  /* ---------- Cat ---------- */
+  .cat-wrap {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: min(420px, 80vw);
+    transform: translate(-50%, -50%);
+    animation: swoop 6s ease-in-out infinite;
+  }
+  .cat {
+    width: 100%;
+    display: block;
+    animation: bob 1.2s ease-in-out infinite;
+    filter: drop-shadow(0 18px 12px rgba(0,0,0,.15));
+  }
+  @keyframes bob {
+    0%, 100% { transform: translateY(0) rotate(-3deg); }
+    50%      { transform: translateY(-22px) rotate(2deg); }
+  }
+  @keyframes swoop {
+    0%, 100% { transform: translate(-60%, -55%); }
+    25%      { transform: translate(-40%, -35%); }
+    50%      { transform: translate(-50%, -65%); }
+    75%      { transform: translate(-65%, -40%); }
+  }
+
+  .cape  { transform-origin: 250px 120px; animation: flap .35s ease-in-out infinite alternate; }
+  .tail  { transform-origin: 75px 150px;  animation: wag 1s ease-in-out infinite alternate; }
+  .ear-l { transform-origin: 300px 85px;  animation: twitch 3s ease-in-out infinite; }
+  .paw-f { transform-origin: 330px 160px; animation: reach 1.2s ease-in-out infinite alternate; }
+  .eye   { transform-origin: center; transform-box: fill-box; animation: blink 4s infinite; }
+
+  @keyframes flap   { from { transform: skewY(-6deg) scaleY(.92); } to { transform: skewY(6deg) scaleY(1.06); } }
+  @keyframes wag    { from { transform: rotate(-12deg); } to { transform: rotate(14deg); } }
+  @keyframes twitch { 0%, 90%, 100% { transform: rotate(0); } 94% { transform: rotate(-15deg); } }
+  @keyframes reach  { from { transform: rotate(-6deg); } to { transform: rotate(8deg); } }
+  @keyframes blink  { 0%, 46%, 50%, 100% { transform: scaleY(1); } 48% { transform: scaleY(.1); } }
+
+  .caption {
+    position: absolute;
+    bottom: 16px;
+    width: 100%;
+    text-align: center;
+    color: #1d4e75;
+    font-weight: 700;
+    letter-spacing: .05em;
+    opacity: .75;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0s !important; animation-iteration-count: 1 !important; }
+  }
+</style>
+</head>
+<body>
+
+  <div class="cloud c1"></div>
+  <div class="cloud c2"></div>
+  <div class="cloud c3"></div>
+  <div class="cloud c4"></div>
+  <div class="cloud c5"></div>
+
+  <div id="lines"></div>
+
+  <div class="cat-wrap">
+    <svg class="cat" viewBox="0 0 440 260" xmlns="http://www.w3.org/2000/svg" aria-label="A cat in a red cape flying through the sky">
+      <!-- Cape (behind body) -->
+      <path class="cape" fill="var(--cape)"
+            d="M250 115 C 200 100, 120 90, 30 70 C 70 110, 60 130, 20 150 C 100 160, 170 160, 240 150 Z"/>
+
+      <!-- Tail -->
+      <path class="tail" fill="none" stroke="var(--fur)" stroke-width="18" stroke-linecap="round"
+            d="M95 150 C 60 150, 40 120, 30 100"/>
+
+      <!-- Back legs -->
+      <ellipse cx="120" cy="178" rx="34" ry="12" fill="var(--fur-dark)" transform="rotate(10 120 178)"/>
+      <ellipse cx="145" cy="183" rx="30" ry="11" fill="var(--fur)" transform="rotate(8 145 183)"/>
+
+      <!-- Body -->
+      <ellipse cx="200" cy="155" rx="110" ry="40" fill="var(--fur)"/>
+      <!-- Stripes -->
+      <path d="M160 118 q8 18 0 34 M190 115 q8 20 0 38 M220 116 q8 18 0 34" stroke="var(--fur-dark)" stroke-width="7" fill="none" stroke-linecap="round"/>
+      <!-- Belly -->
+      <ellipse cx="215" cy="175" rx="70" ry="16" fill="#fde2b8"/>
+
+      <!-- Front paws reaching forward -->
+      <g class="paw-f">
+        <ellipse cx="350" cy="168" rx="40" ry="12" fill="var(--fur-dark)" transform="rotate(-8 350 168)"/>
+        <ellipse cx="365" cy="178" rx="38" ry="11" fill="var(--fur)" transform="rotate(-4 365 178)"/>
+        <circle cx="400" cy="176" r="8" fill="#fde2b8"/>
+      </g>
+
+      <!-- Cape collar knot -->
+      <circle cx="285" cy="128" r="9" fill="#b71c2a"/>
+
+      <!-- Head -->
+      <g>
+        <!-- Ears -->
+        <path class="ear-l" d="M290 95 L300 45 L330 80 Z" fill="var(--fur)"/>
+        <path d="M296 88 L302 58 L322 80 Z" fill="#f7b7a3"/>
+        <path d="M345 78 L375 42 L380 95 Z" fill="var(--fur)"/>
+        <path d="M352 80 L372 55 L373 88 Z" fill="#f7b7a3"/>
+
+        <circle cx="335" cy="115" r="50" fill="var(--fur)"/>
+        <!-- Forehead stripes -->
+        <path d="M325 70 v14 M338 68 v16 M351 70 v14" stroke="var(--fur-dark)" stroke-width="5" stroke-linecap="round"/>
+        <!-- Muzzle -->
+        <ellipse cx="350" cy="132" rx="26" ry="18" fill="#fde2b8"/>
+
+        <!-- Goggles strap -->
+        <path d="M288 100 Q335 88 384 100" stroke="#3b3b3b" stroke-width="6" fill="none"/>
+        <!-- Eyes / goggles -->
+        <circle cx="320" cy="105" r="15" fill="#bfe6ff" stroke="#3b3b3b" stroke-width="5"/>
+        <circle cx="360" cy="105" r="15" fill="#bfe6ff" stroke="#3b3b3b" stroke-width="5"/>
+        <ellipse class="eye" cx="322" cy="106" rx="5" ry="8" fill="#1b2a1b"/>
+        <ellipse class="eye" cx="362" cy="106" rx="5" ry="8" fill="#1b2a1b"/>
+        <circle cx="325" cy="101" r="2.5" fill="#fff"/>
+        <circle cx="365" cy="101" r="2.5" fill="#fff"/>
+
+        <!-- Nose & mouth -->
+        <path d="M345 124 h12 l-6 7 Z" fill="#e5737b"/>
+        <path d="M351 131 q-6 9 -14 4 M351 131 q6 9 14 4" stroke="#5a3a2a" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+
+        <!-- Whiskers (blown back) -->
+        <g stroke="#5a3a2a" stroke-width="2" stroke-linecap="round">
+          <path d="M330 130 q-30 -2 -50 -8"/>
+          <path d="M330 136 q-30 4 -52 4"/>
+          <path d="M372 130 q20 -6 34 -6"/>
+          <path d="M372 136 q20 2 34 6"/>
+        </g>
+        <!-- Cheeks -->
+        <circle cx="312" cy="132" r="7" fill="#f7a1a1" opacity=".6"/>
+      </g>
+    </svg>
+  </div>
+
+  <div class="caption">✨ Up, up and a-meow! ✨</div>
+
+<script>
+  // Generate speed lines at random heights for a sense of motion
+  const holder = document.getElementById('lines');
+  for (let i = 0; i < 14; i++) {
+    const l = document.createElement('div');
+    l.className = 'line';
+    l.style.top = (Math.random() * 100) + '%';
+    l.style.left = (50 + Math.random() * 50) + '%';
+    l.style.width = (60 + Math.random() * 140) + 'px';
+    l.style.animationDelay = (-Math.random()) + 's';
+    l.style.animationDuration = (0.6 + Math.random() * 0.8) + 's';
+    holder.appendChild(l);
+  }
+</script>
+</body>
+</html>
