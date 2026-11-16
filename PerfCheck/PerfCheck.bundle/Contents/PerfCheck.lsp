@@ -21,6 +21,7 @@
 ;;;    PERFLOG     Show the slowest commands recorded by PERFWATCH.
 ;;;    PERFFIX     Apply the recommended settings (backs up the old values).
 ;;;    PERFUNDO    Put back the settings PERFFIX changed.
+;;;    PERFRESET   Put back everything PerfCheck changed.
 ;;;    PERFHELP    List the commands.
 ;;;
 ;;;  Reports and history are saved in %LOCALAPPDATA%\C3D-PerfCheck
@@ -28,7 +29,7 @@
 
 (vl-load-com)
 
-(setq *pc-version* "1.2")
+(setq *pc-version* "1.3")
 (setq *pc-dir* nil)
 
 ;;; ---------------------------------------------------------------- basics
@@ -2165,7 +2166,7 @@
               (setq n (1+ n))
             )
           )
-          (princ (strcat "\nChanged " (itoa n) " setting(s). Old values saved - type PERFUNDO to put them back."))
+          (princ (strcat "\nChanged " (itoa n) " setting(s). Old values saved - type PERFUNDO (or PERFRESET) to put them back."))
         )
       )
     )
@@ -2224,6 +2225,99 @@
   (princ)
 )
 
+;;; =============================================================== PERFRESET
+;;; Puts back everything C3D PerfCheck changed.
+
+;; Autodesk's out-of-the-box values for the settings PERFFIX touches. Used only
+;; when there is no backup (e.g. PERFUNDO already ran, or the backup was lost).
+(setq *pc-defaults*
+  '(("ROLLOVERTIPS" . 1) ("SELECTIONPREVIEW" . 3) ("VTENABLE" . 3) ("COMMANDPREVIEW" . 1)
+    ("HPQUICKPREVIEW" . 1) ("LINESMOOTHING" . 1) ("LAYOUTREGENCTL" . 2) ("XLOADCTL" . 2)
+    ("GRIPOBJLIMIT" . 100)))
+
+(defun pc:restore-list (lst / n)
+  (setq n 0)
+  (foreach p lst
+    (if (not (vl-catch-all-error-p (vl-catch-all-apply 'setvar (list (car p) (cdr p)))))
+      (progn
+        (setq n (1+ n))
+        (princ (strcat "\n  " (pc:pad (car p) 18) "set to " (vl-princ-to-string (cdr p))))
+      )
+      (princ (strcat "\n  Could not set " (car p)))
+    )
+  )
+  n
+)
+
+(defun pc:delete-saved-files (/ dir n)
+  (setq dir (pc:dir) n 0)
+  ;; only ever delete PerfCheck's own files, and only in its own folder
+  (if (wcmatch (strcase dir) "*\\C3D-PERFCHECK")
+    (foreach pat '("PerfReport_*.txt" "History.csv" "SlowCommands.log" "copytest.bin")
+      (foreach f (vl-directory-files dir pat 1)
+        (if (vl-file-delete (strcat dir "\\" f)) (setq n (1+ n)))
+      )
+    )
+  )
+  n
+)
+
+(defun C:PERFRESET (/ bak list-to-use src ans watch n)
+  (pc:begin)
+  (setq bak (pc:read-bak)
+        watch (or *pc-cmd-reactor* (= (getenv "C3DPerfCheckWatch") "1")))
+  (princ "\n--- PERFRESET: put back everything C3D PerfCheck changed ---")
+  (if bak
+    (setq list-to-use bak src "your original values (saved by PERFFIX)")
+    (progn
+      (princ "\nNo backup of your original settings was found (PERFUNDO may already have run).")
+      (initget "Defaults Skip")
+      (if (/= "Skip" (getkword "\nSet them to the Autodesk defaults instead? [Defaults/Skip] <Defaults>: "))
+        (setq list-to-use *pc-defaults* src "the Autodesk defaults"))
+    )
+  )
+  (if list-to-use
+    (progn
+      (princ (strcat "\nSettings will go back to " src ":"))
+      (foreach p list-to-use
+        (princ (strcat "\n  " (pc:pad (car p) 18) (vl-princ-to-string (getvar (car p)))
+                       "  ->  " (vl-princ-to-string (cdr p)))))
+    )
+  )
+  (princ (strcat "\nPERFWATCH (command timer): " (if watch "ON -> OFF" "already off")))
+  (initget "Yes No")
+  (setq ans (getkword "\nGo ahead? [Yes/No] <Yes>: "))
+  (if (= ans "No")
+    (princ "\nNothing was changed.")
+    (progn
+      (if list-to-use
+        (progn
+          (setq n (pc:restore-list list-to-use))
+          (if bak (vl-file-delete (pc:bak-file)))
+          (princ (strcat "\nRestored " (itoa n) " setting(s)."))
+        )
+      )
+      (pc:watch-off)
+      (setenv "C3DPerfCheckWatch" "0")
+      (setenv "C3DPerfCheckWarnMs" "")
+      (setq *pc-stats* nil)
+      (princ "\nPERFWATCH is off.")
+      (initget "Yes No")
+      (if (= "Yes" (getkword "\nAlso delete the saved reports, History.csv and the slow-command log? [Yes/No] <No>: "))
+        (princ (strcat "\nDeleted " (itoa (pc:delete-saved-files)) " file(s) from " (pc:dir))))
+      (princ "\nDone. Notes:")
+      (princ "\n  - PERFCHECK itself changes nothing permanently (its test lines are deleted and")
+      (princ "\n    the settings it touches during tests are put back).")
+      (princ "\n  - If you let PERFFIX purge REGAPPs or reset the scale list in a drawing, that")
+      (princ "\n    stays in that drawing (use UNDO there before closing, or open its .bak file).")
+      (princ "\n  - Changes you made yourself (e.g. in OPTIONS) are not tracked - change those back by hand.")
+      (princ "\n  - To remove the tool completely: run Uninstall.bat, or take PerfCheck.lsp out of")
+      (princ "\n    APPLOAD > Startup Suite if you added it there.")
+    )
+  )
+  (pc:finish)
+)
+
 (defun C:PERFHELP ()
   (princ "\n--- C3D PerfCheck commands ---")
   (princ "\n  PERFCHECK   Full check + benchmarks (30-60 s). Opens a report in Notepad.")
@@ -2232,6 +2326,7 @@
   (princ "\n  PERFLOG     Show the slowest commands recorded by PERFWATCH.")
   (princ "\n  PERFFIX     Apply the recommended settings (old values are backed up).")
   (princ "\n  PERFUNDO    Put back the settings PERFFIX changed.")
+  (princ "\n  PERFRESET   Put back EVERYTHING PerfCheck changed (settings, PERFWATCH, saved files).")
   (princ (strcat "\n  Reports and history: " (pc:dir)))
   (princ)
 )
@@ -2240,6 +2335,6 @@
 
 (if (= (getenv "C3DPerfCheckWatch") "1") (pc:watch-on))
 
-(princ (strcat "\nC3D PerfCheck " *pc-version* " loaded:  PERFCHECK (full)  |  PERFQUICK  |  PERFWATCH  |  PERFLOG  |  PERFFIX  |  PERFHELP"
+(princ (strcat "\nC3D PerfCheck " *pc-version* " loaded:  PERFCHECK (full)  |  PERFQUICK  |  PERFWATCH  |  PERFLOG  |  PERFFIX  |  PERFRESET  |  PERFHELP"
                (if *pc-cmd-reactor* "   [PERFWATCH is ON]" "")))
 (princ)

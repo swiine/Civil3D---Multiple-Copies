@@ -14,6 +14,7 @@ It is a single AutoLISP file. Nothing has to be compiled, and it also works in p
 | `PERFLOG`   | Shows the slowest commands that PERFWATCH recorded.                          |
 | `PERFFIX`   | Applies the recommended settings. It backs up the old values first and offers to clean REGAPP / scale-list bloat. |
 | `PERFUNDO`  | Puts back the settings PERFFIX changed.                                      |
+| `PERFRESET` | Puts back **everything** PerfCheck changed: your original settings (or the Autodesk defaults if there is no backup), turns PERFWATCH off, and can delete the saved reports. |
 | `PERFHELP`  | Lists the commands.                                                          |
 
 ## What it checks
@@ -105,7 +106,7 @@ To remove it, double-click `Uninstall.bat`.
 - Copy the `PerfCheck.bundle` folder to `%APPDATA%\Autodesk\ApplicationPlugins\`, **or**
 - Type `APPLOAD` and load `PerfCheck.bundle\Contents\PerfCheck.lsp`.
 
-When it loads, the command line shows `C3D PerfCheck 1.2 loaded: ...`.
+When it loads, the command line shows `C3D PerfCheck 1.3 loaded: ...`.
 
 ## How to track down stutter
 
@@ -114,7 +115,7 @@ When it loads, the command line shows `C3D PerfCheck 1.2 loaded: ...`.
 1. Run `PERFCHECK` **while it is stuttering**. Fix the HIGH items first.
 2. Restart Civil 3D (and Windows if the report says so), then run `PERFCHECK` again. If the score and stutter test are much better, the cause was the long session, memory, or background programs.
 3. Turn on `PERFWATCH` and work normally for an hour. `PERFLOG` then shows exactly which commands are slow. A slow `<file write: save/autosave>` line means saving is the problem (SAVETIME, network or cloud folder, file size). A slow `REGEN` means the drawing is too heavy to display.
-4. Run `PERFFIX` to apply the safe setting changes. `PERFUNDO` reverts them.
+4. Run `PERFFIX` to apply the setting changes. Some of them change how Civil 3D feels (no hover highlight, no smooth zoom, no TRIM/FILLET preview). If you don't like that, `PERFUNDO` or `PERFRESET` puts everything back.
 
 ## Notes
 
