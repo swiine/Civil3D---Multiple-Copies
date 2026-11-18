@@ -16,7 +16,8 @@ It is a single AutoLISP file. Nothing has to be compiled, and it also works in p
 
 1. Draw the path of the **centre of the front axle** with `PLINE`. Use arcs for the turns, or draw straight lines and `FILLET` them with a radius.
 2. Type `SWEPT`. Pick the path **near the end the vehicle starts from**.
-3. Read the report on the command line (example below; your numbers depend on the path). Then move the cursor along the path to "drive" the vehicle. Click to leave an outline wherever you want one, and press Enter to finish.
+3. Read the report on the command line (example below; your numbers depend on the path). The vehicle is then **animated** along the path in real time. It is yellow, and turns red wherever the steering is over its limit.
+4. When it finishes, choose from `Replay`, `Faster`, `Slower`, `Drive` (move the cursor along the path to step the vehicle yourself, and click to leave an outline) or `eXit`. Press Esc at any time to stop.
 
 ```
 WB-67: path 312.4 FT
@@ -30,12 +31,16 @@ WB-67: path 312.4 FT
 | Type      | What it does |
 |-----------|--------------|
 | `SWEPT`   | Pick a path and run the swept path. Options: `Vehicle` (pick another vehicle) and `Settings` |
-| `SWDRIVE` | Drive the last swept path again with the cursor and leave more outlines |
+| `SWDRIVE` | Replay the animation of the last swept path, or drive it with the cursor and leave more outlines |
 | `SWVEH`   | Vehicle library: `List`, `Select`, `Add` (your own vehicle), `Delete` |
-| `SWSET`   | Turn the envelope, tyre paths, corner traces and drive mode on or off. Also sets the outline spacing and drawing units |
+| `SWSET`   | Turn the envelope, tyre paths, corner traces, animation and drive mode on or off. Also sets the animation speed, outline spacing and drawing units |
 | `SWHELP`  | Show the command list |
 
 A path can be a line, arc, polyline, 3D polyline, spline, or Civil 3D alignment.
+
+## Animation
+
+The animation plays at a real driving speed: 10 mph by default in feet drawings, or 10 km/h in metric drawings. Change the speed with `Faster` / `Slower` after it plays, or set it in `SWSET` → `Speed`. The speed you choose is remembered. Frames are timed against the clock, so a 300 ft path at 10 mph takes about 20 seconds however fast your screen redraws. To skip the animation, turn it off in `SWSET` → `Animate`.
 
 ## Vehicles
 
@@ -87,4 +92,4 @@ To remove it, double-click `Uninstall.bat`.
 
 **Option B: by hand**: copy the `SweptPath.bundle` folder to `%APPDATA%\Autodesk\ApplicationPlugins\` and restart Civil 3D. Or type `APPLOAD` and load `SweptPath.bundle\Contents\SweptPath.lsp`.
 
-When it loads, the command line shows `SweptPath 1.0 loaded: ...`.
+When it loads, the command line shows `SweptPath 1.1 loaded: ...`.

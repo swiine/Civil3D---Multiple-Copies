@@ -13,7 +13,7 @@
 ;;;
 ;;;  COMMANDS
 ;;;    SWEPT     Run a swept path along a path you pick
-;;;    SWDRIVE   Drive the last swept path again with the cursor
+;;;    SWDRIVE   Replay the animation of the last swept path, or drive it
 ;;;    SWVEH     Vehicle library: list, select, add or delete vehicles
 ;;;    SWSET     Settings (what gets drawn, outline spacing, units)
 ;;;    SWHELP    Show the command list
@@ -23,7 +23,7 @@
 
 (vl-load-com)
 
-(setq *sw-version* "1.0")
+(setq *sw-version* "1.1")
 
 ;;; ------------------------------------------------------------ 2D vectors
 
@@ -110,6 +110,7 @@
 
 (setq *sw-defaults*
  '(("Envelope" . "1") ("Wheels" . "1") ("Corners" . "0") ("Drive" . "1")
+   ("Animate" . "1") ("Speed" . "10")
    ("Outlines" . "AUTO") ("Units" . "AUTO") ("Vehicle" . "WB-67"))
 )
 
@@ -634,6 +635,71 @@
   (redraw)
 )
 
+;;; ------------------------------------------------------------ animation
+;;;
+;;;  Plays the vehicle along the path in real time. The speed is in mph
+;;;  for feet / inch drawings and km/h for metric drawings. Each frame is
+;;;  picked from the elapsed time, so the speed stays right even when the
+;;;  screen is slow to redraw. DELAY lets the screen repaint between frames.
+
+(defun sw:imperial-p () (member *sw-un* '("FT" "USFT" "IN")))
+(defun sw:speed-name () (if (sw:imperial-p) "mph" "km/h"))
+
+;; Animation speed in drawing units per second.
+(defun sw:speed-du (/ v)
+  (setq v (atof (sw:opt "Speed")))
+  (if (<= v 0.0) (setq v 10.0))
+  (/ (* v (if (sw:imperial-p) 0.44704 (/ 1.0 3.6)))
+     (cdr (assoc *sw-un* *sw-unit-m*)))
+)
+
+;; Milliseconds from a running clock.
+(defun sw:ms (/ v)
+  (setq v (getvar "MILLISECS"))
+  (if v (float v) (* 86400000.0 (rem (getvar "DATE") 1.0)))
+)
+
+(defun sw:animate (states / n spd t0 now el idx prev st)
+  (setq n (length states) spd (sw:speed-du) prev -1 idx 0)
+  (princ (strcat "
+Playing " *sw-vname* " at " (sw:opt "Speed") " " (sw:speed-name)
+                 " (" (sw:fmt (/ *sw-plen* spd)) " s). Red = steering over the limit."))
+  (setq t0 (sw:ms))
+  (while (< prev (1- n))
+    (setq now (sw:ms) el (/ (- now t0) 1000.0))
+    (if (< el 0.0) (setq t0 now el 0.0))      ; clock wrapped
+    (setq idx (min (1- n) (fix (/ (* el spd) *sw-rec*))))
+    (if (/= idx prev)
+      (progn
+        (setq prev idx st (nth idx states))
+        (redraw)
+        (sw:grdraw st (if (> (abs (sw:steer st)) (+ *sw-maxSteer* 0.25)) 1 2))))
+    (command "_.DELAY" 20)
+  )
+)
+
+;;; After a run: play the animation, then offer replay / speed / drive.
+(defun sw:playback (states / k done v)
+  (cond ((sw:on "Animate") (sw:animate states))
+        ((sw:on "Drive") (sw:drive states)))
+  (while (not done)
+    (initget "Replay Faster Slower Drive eXit")
+    (setq k (getkword (strcat "\nAnimation " (sw:opt "Speed") " " (sw:speed-name)
+                              " [Replay/Faster/Slower/Drive/eXit] <eXit>: ")))
+    (redraw)
+    (cond
+      ((or (null k) (= k "eXit")) (setq done T))
+      ((= k "Replay") (sw:animate states))
+      ((member k '("Faster" "Slower"))
+       (setq v (* (atof (sw:opt "Speed")) (if (= k "Faster") 2.0 0.5)))
+       (sw:put "Speed" (rtos (max 0.5 (min v 640.0)) 2 1))
+       (sw:animate states))
+      ((= k "Drive") (sw:drive states))
+    )
+  )
+  (redraw)
+)
+
 ;;; ------------------------------------------------------------ error / env
 
 (defun sw:err (msg)
@@ -646,7 +712,9 @@
 )
 
 (defun sw:begin ()
-  (setq *sw-olderr* *error* *error* sw:err *sw-made* nil)
+  (setq *sw-olderr* *error* *error* sw:err *sw-made* nil
+        *sw-cmdecho* (getvar "CMDECHO"))
+  (setvar "CMDECHO" 0)
   (setq *sw-doc* (vla-get-ActiveDocument (vlax-get-acad-object)))
   (vla-StartUndoMark *sw-doc*)
   (setq *sw-undo* T)
@@ -654,6 +722,7 @@
 
 (defun sw:end ()
   (if *sw-undo* (progn (setq *sw-undo* nil) (vla-EndUndoMark *sw-doc*)))
+  (if *sw-cmdecho* (setvar "CMDECHO" *sw-cmdecho*))
   (setq *error* *sw-olderr*)
   (princ)
 )
@@ -662,7 +731,7 @@
 
 (defun sw:run (veh e pick / sp ep pw states res fails spc next st0 tg0 grp off un)
   (sw:prep veh)
-  (setq un (sw:dwg-units))
+  (setq un (sw:dwg-units) *sw-un* un)
   (setq *sw-path* e *sw-plen* (sw:path-len e))
   (if (or (null *sw-plen*) (<= *sw-plen* 0.0))
     (progn (princ "\nThat path has no length.") (exit)))
@@ -733,7 +802,7 @@
   (if (and fails (> fails 0))
     (princ (strcat "\n  Note: " (itoa fails) " envelope piece(s) could not be merged.")))
 
-  (if (sw:on "Drive") (sw:drive states))
+  (sw:playback states)
   (if (setq grp (sw:finish-group))
     (princ (strcat "\nEverything is in group " grp " on SWEPT-* layers. Erase the group to remove it.")))
 )
@@ -768,7 +837,7 @@
   (if (and *sw-last* *sw-path* (entget *sw-path*))
     (progn
       (sw:layers)
-      (sw:drive *sw-last*)
+      (sw:playback *sw-last*)
       (if (setq grp (sw:finish-group)) (princ (strcat "\nOutlines added as group " grp "."))))
     (princ "\nRun SWEPT first. SWDRIVE replays the last swept path in this drawing.")
   )
@@ -779,12 +848,17 @@
   (while (not done)
     (princ (strcat "\nEnvelope=" (sw:onoff "Envelope") "  Wheels=" (sw:onoff "Wheels")
                    "  Corners=" (sw:onoff "Corners") "  Outlines=" (sw:opt "Outlines")
-                   "  Drive=" (sw:onoff "Drive") "  Units=" (sw:opt "Units")))
-    (initget "Envelope Wheels Corners Outlines Drive Units eXit")
-    (setq k (getkword "\nChange [Envelope/Wheels/Corners/Outlines/Drive/Units/eXit] <eXit>: "))
+                   "  Drive=" (sw:onoff "Drive") "  Units=" (sw:opt "Units")
+                   "\n  Animate=" (sw:onoff "Animate") "  Speed=" (sw:opt "Speed") " (mph in feet drawings, km/h in metric)"))
+    (initget "Envelope Wheels Corners Outlines Drive Animate Speed Units eXit")
+    (setq k (getkword "\nChange [Envelope/Wheels/Corners/Outlines/Drive/Animate/Speed/Units/eXit] <eXit>: "))
     (cond
       ((or (null k) (= k "eXit")) (setq done T))
-      ((member k '("Envelope" "Wheels" "Corners" "Drive")) (sw:toggle k))
+      ((member k '("Envelope" "Wheels" "Corners" "Drive" "Animate")) (sw:toggle k))
+      ((= k "Speed")
+       (initget 6)
+       (setq v (getreal (strcat "\nAnimation speed, mph (feet drawings) or km/h (metric) <" (sw:opt "Speed") ">: ")))
+       (if v (sw:put "Speed" (rtos v 2 1))))
       ((= k "Outlines")
        (initget 6 "Auto None")
        (setq v (getdist "\nVehicle outline every [Auto/None] or distance along path <Auto>: "))
@@ -899,7 +973,8 @@
   (princ (strcat "\n--- SweptPath " *sw-version* " ---"
     "\n  SWEPT    Pick a path (near the end to start from). The vehicle drives it and"
     "\n           SweptPath draws tyre paths, body envelope and outlines."
-    "\n  SWDRIVE  Drive the last path again with the cursor and leave outlines"
+    "\n           Afterwards the vehicle is animated along the path."
+    "\n  SWDRIVE  Replay the last animation, or drive it with the cursor"
     "\n  SWVEH    Vehicle library: List / Select / Add / Delete"
     "\n  SWSET    What gets drawn, outline spacing, drawing units"
     "\n  Draw the path with PLINE and use arcs (or FILLET) for the turns."))
