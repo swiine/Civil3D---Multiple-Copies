@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ApplicationPackage SchemaVersion="1.0"
+                    AutodeskProduct="AutoCAD"
+                    ProductType="Application"
+                    Name="SweptPath"
+                    Description="Vehicle swept path and turning analysis for AutoCAD / Civil 3D"
+                    AppVersion="1.0.0"
+                    ProductCode="{4E33BECA-239C-467E-8076-7E8F3C4806BC}"
+                    UpgradeCode="{3BBF5CA6-653C-4DFE-945C-7721102396B1}">
+  <CompanyDetails Name="SweptPath" />
+  <Components>
+    <RuntimeRequirements OS="Win64" Platform="AutoCAD*" SeriesMin="R24.0" SeriesMax="R25.9" />
+    <ComponentEntry AppName="SweptPath"
+                    ModuleName="./Contents/SweptPath.lsp"
+                    AppDescription="Vehicle swept paths (SWEPT / SWVEH / SWSET)"
+                    LoadOnAutoCADStartup="True"
+                    PerDocument="True" />
+  </Components>
+</ApplicationPackage>

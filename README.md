@@ -88,3 +88,9 @@ If you take over Ctrl+C / Ctrl+V:
 5. A test paste, which is undone automatically afterwards.
 
 It prints the results, saves them to `MultiClip_Diag.txt` in the slot folder, and opens that file in Notepad so you can share it.
+
+---
+
+# Also in this repository: SweptPath
+
+[`SweptPath/`](SweptPath/README.md) is a vehicle swept-path / turning analysis tool for Civil 3D, similar to AutoTURN. Draw the front-axle path, type `SWEPT`, and it draws the tyre paths, the body envelope and vehicle outlines, and circles any spot where the vehicle can't make the turn. Download `SweptPath.zip` and run `Install.bat`.
