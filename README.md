@@ -1,4 +1,4 @@
-# MultiClip for Civil 3D 2026
+# MultiClip 2.1 for AutoCAD / Civil 3D
 
 Nine numbered clipboards in place of one. Copy several things in one drawing, switch to the other drawing once, and paste them all.
 
@@ -7,14 +7,14 @@ Old way:  Ctrl+C → switch → Ctrl+V → switch back → Ctrl+C → switch →
 MultiClip: C1, C2, C3 → switch once → P1, P2, P3
 ```
 
-It is a single AutoLISP file. Nothing has to be compiled, and it also works in plain AutoCAD 2021 and later.
+It is a single standalone AutoLISP file, `MultiClip.lsp`. Nothing has to be compiled. It works in Civil 3D and plain AutoCAD 2021 and later.
 
 ## Commands
 
 | Type        | What it does                                                         |
 |-------------|----------------------------------------------------------------------|
 | `C1` … `C9` | Copy the selection into slot 1–9 (works with objects already selected) |
-| `P1` … `P9` | Paste slot 1–9 and drag it into place                                |
+| `P1` … `P9` | Paste slot 1–9. Asks `[Original/Select]`: original coordinates, or pick a point. Enter repeats your last choice |
 | `PO1` … `PO9` | Paste slot 1–9 at its **original coordinates**                     |
 | `MC`        | Copy, then **press a number key** to choose the slot (Enter = normal Ctrl+C) |
 | `MCB`       | Same as `MC`, but you pick the base point                            |
@@ -30,23 +30,13 @@ Each slot is saved as a small DWG in `%LOCALAPPDATA%\C3D-MultiClip`. Slots work 
 
 ## Install
 
-**Option A: installer (easiest)**
-1. Unzip `MultiClip.zip`.
-2. Double-click `Install.bat`.
-3. Restart Civil 3D. If a security prompt about loading MultiClip.lsp appears, choose **Always Load**.
+1. Unzip `MultiClip.zip` (or download `MultiClip.lsp`) anywhere you like.
+2. Type `APPLOAD`, browse to `MultiClip.lsp` and click **Load**. If a security prompt appears, choose **Always Load**.
+3. To load it every session, click **Contents…** under *Startup Suite* and add the file there.
 
-To remove it, double-click `Uninstall.bat`.
+When it loads, the command line shows `MultiClip 2.1 loaded: ...`.
 
-**Option B: auto-load by hand**
-1. Copy the whole `MultiClip.bundle` folder to
-   `%APPDATA%\Autodesk\ApplicationPlugins\`
-2. Restart Civil 3D. If a security prompt about loading MultiClip.lsp appears, choose **Always Load**.
-
-**Option C: manual**
-1. Type `APPLOAD` and browse to `MultiClip.bundle\Contents\MultiClip.lsp`.
-2. To load it every session, click **Contents…** under *Startup Suite* and add the file there.
-
-When it loads, the command line shows `MultiClip loaded: ...`.
+Upgrading from 1.x: version 1.x was installed as `MultiClip.bundle`. Delete `%APPDATA%\Autodesk\ApplicationPlugins\MultiClip.bundle` so only one copy loads. Slots you already filled keep working.
 
 ## Making it "Ctrl+C then 1"
 
@@ -82,9 +72,8 @@ If you take over Ctrl+C / Ctrl+V:
 
 **`MCDIAG`** checks each step MultiClip relies on:
 1. Whether the slot folder exists and can be written to.
-2. Whether the commands are loaded.
-3. What is saved in each slot.
-4. A test copy, using both export methods.
-5. A test paste, which is undone automatically afterwards.
+2. What is saved in each slot.
+3. A test copy, using both export methods.
+4. A test paste, which is undone automatically afterwards.
 
 It prints the results, saves them to `MultiClip_Diag.txt` in the slot folder, and opens that file in Notepad so you can share it.
